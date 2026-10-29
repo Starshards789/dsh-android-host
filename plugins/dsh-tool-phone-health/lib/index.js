@@ -45,34 +45,37 @@ const inject = ["tools"];
 /**
  * 定位 @deepseek-ai/dsh-tools 的入口文件。
  *
+ * ★ 必须对 dsh 两种安装布局都成立（实测，这是升级会暴露的坑）：
+ *
+ *   rc.2（社区壳的安装方式 → 嵌套）:
+ *     dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools
+ *   rc.4（npm install 默认 → 扁平）:
+ *     dshroot/lib/node_modules/@deepseek-ai/dsh-tools
+ *
+ * 同一份插件在两版之间切换时必须都能加载，否则「升级不丢插件」就是假成立
+ * （文件在、md5 没变、却 import 不进来）。
+ *
  * 从本文件 URL 出发：.../files/dshhome/profiles/web/node_modules/dsh-tool-phone-health/lib/index.js
- * 目标是：          .../files/payload/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools/lib/index.js
- * 所以往上 6 层到 files/，再下 payload/。同时兼容 DSH_ROOT 环境变量覆盖。
+ * 往上 6 层到 files/，再下 payload/。同时兼容 DSH_ROOT 环境变量覆盖。
  */
 function locateDshTools() {
     const here = dirname(fileURLToPath(import.meta.url)); // .../dsh-tool-phone-health/lib
-    const candidates = [];
-
-    // ① 标准布局：<files>/payload/dshroot/...
     const filesDir = resolvePath(here, "../../../../../../"); // → .../files
-    candidates.push(
-        resolvePath(
-            filesDir,
-            "payload/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools/lib/index.js"
-        )
-    );
+    const dshroot = resolvePath(filesDir, "payload/dshroot");
+    const roots = [dshroot];
+    if (process.env.DSH_ROOT) roots.push(process.env.DSH_ROOT);
 
-    // ② 环境变量兜底（App 传了 DSH_ROOT 的话）
-    if (process.env.DSH_ROOT) {
-        candidates.push(
-            resolvePath(
-                process.env.DSH_ROOT,
-                "lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools/lib/index.js"
-            )
-        );
+    const candidates = [];
+    for (const root of roots) {
+        const nm = resolvePath(root, "lib/node_modules/@deepseek-ai");
+        // ① 扁平布局（rc.4+ / npm 默认）
+        candidates.push(resolvePath(nm, "dsh-tools/lib/index.js"));
+        // ② 嵌套布局（rc.2 / 社区壳）
+        candidates.push(resolvePath(nm, "dsh/node_modules/@deepseek-ai/dsh-tools/lib/index.js"));
+        // ③ dsh 包内自带一层（个别版本）
+        candidates.push(resolvePath(nm, "dsh/lib/node_modules/@deepseek-ai/dsh-tools/lib/index.js"));
     }
-
-    // ③ 直接命中 node_modules（万一以后布局变成同级）
+    // ④ 万一以后布局变成同级（插件自己 node_modules 里有一份）
     candidates.push(resolvePath(here, "../node_modules/@deepseek-ai/dsh-tools/lib/index.js"));
 
     for (const p of candidates) {
