@@ -11,6 +11,11 @@
     -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- 保活三件套 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:allowBackup="false"
         android:label="dsh host"
@@ -26,6 +31,26 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          前台服务持有引擎的生命周期。startForeground 的常驻通知把进程提到前台
+          优先级，避免切到后台后被常规回收；START_STICKY 让它被杀后自动重启。
+
+          targetSdk 28 不需要 android:foregroundServiceType（那是 targetSdk 34+
+          配合 Android 14 才强制的），这里省略是刻意的。
+        -->
+        <service
+            android:name=".EngineService"
+            android:exported="false" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

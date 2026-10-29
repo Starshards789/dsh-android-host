@@ -1,5 +1,7 @@
 package cc.bestly.dsh
 
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -28,7 +30,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -65,7 +66,6 @@ class MainActivity : ComponentActivity() {
 fun EngineScreen(activity: ComponentActivity) {
     val state by EngineLauncher.state.collectAsState()
     val log by EngineLauncher.log.collectAsState()
-    val scope = rememberCoroutineScope()
     val missing = remember { EngineLauncher.preflight(activity) }
     val running = state is EngineState.Running || state is EngineState.Starting
 
@@ -74,9 +74,9 @@ fun EngineScreen(activity: ComponentActivity) {
     // 的坐标不可靠（uiautomator 报的 bounds 和实际触摸目标不一致），反复点不中。
     // 而且真实产品形态本来就是：用户打开 App，引擎就该起来。
     LaunchedEffect(Unit) {
-        if (EngineLauncher.state.value is EngineState.Idle) {
-            EngineLauncher.start(activity, scope)
-        }
+        // 引擎交给前台服务持有 —— 服务活着引擎才活着，切后台不会被系统回收。
+        // 这里只负责把服务叫起来，不直接 fork 引擎。
+        startEngineService(activity)
     }
 
     Column(
@@ -144,14 +144,14 @@ fun EngineScreen(activity: ComponentActivity) {
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Button(
-                onClick = { EngineLauncher.start(activity, scope) },
+                onClick = { startEngineService(activity) },
                 enabled = !running && missing.isEmpty(),
                 modifier = Modifier.weight(1f)
             ) {
                 Text(if (running) "运行中" else "启动引擎")
             }
             OutlinedButton(
-                onClick = { EngineLauncher.stop() },
+                onClick = { stopEngineService(activity) },
                 enabled = running,
                 modifier = Modifier.weight(1f)
             ) {
@@ -229,4 +229,27 @@ private fun stateColor(s: EngineState): Color = when (s) {
     is EngineState.Starting -> Color(0xFFF9A825)
     is EngineState.Running -> Color(0xFF2E7D32)
     is EngineState.Failed -> Color(0xFFC62828)
+}
+
+/**
+ * 拉起前台服务。Android 8+ 必须用 startForegroundService，否则服务起来后
+ * 没在 5 秒内 startForeground 会 ANR；这里 Service.onCreate 里就调了。
+ */
+private fun startEngineService(ctx: android.content.Context) {
+    val svc = Intent(ctx, EngineService::class.java)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        ctx.startForegroundService(svc)
+    } else {
+        ctx.startService(svc)
+    }
+}
+
+/**
+ * 停下服务再停引擎。
+ * 顺序不能反：先 stopService 才会走到 Service.onDestroy 取消 scope，
+ * 否则服务里的看护协程会把刚停掉的引擎又拉起来。
+ */
+private fun stopEngineService(ctx: android.content.Context) {
+    ctx.stopService(Intent(ctx, EngineService::class.java))
+    EngineLauncher.stop()
 }
