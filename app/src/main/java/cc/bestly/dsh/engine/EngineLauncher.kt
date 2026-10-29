@@ -229,9 +229,17 @@ object EngineLauncher {
         _log.value = (_log.value + line).takeLast(400)
     }
 
-    /** Process.pid() 要 API 26+，我们 minSdk 34 所以直接用 */
+    /**
+     * 取子进程 pid。
+     *
+     * java.lang.Process.pid() 是 Java 9 才有的，安卓上没有 —— 直接用会
+     * Unresolved reference。安卓的 ProcessImpl/UNIXProcess 有私有字段 pid，
+     * 反射读它；读不到就返回 -1（pid 只用于展示和写 runtime/pid，缺了不影响启动）。
+     */
     private fun pidOf(p: Process): Int = try {
-        p.pid().toInt()
+        val f = p.javaClass.getDeclaredField("pid")
+        f.isAccessible = true
+        f.getInt(p)
     } catch (_: Throwable) {
         -1
     }
