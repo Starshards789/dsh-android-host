@@ -139,10 +139,11 @@ async function collectBattery() {
         capacity: "capacity",        // %
         status: "status",            // Charging / Discharging / Full
         temp: "temp",                // 0.1℃ 单位
-        current_now: "current_now",  // µA，负=放电
+        current_now: "current_now",  // µA（标准）或 mA（部分 OEM），下方自适应
         voltage_now: "voltage_now",  // µV
-        charge_counter: "charge_counter",
+        charge_counter: "charge_counter", // µAh
         health: "health",
+        cycle_count: "cycle_count",  // 充电循环次数（部分设备不提供）
     };
     const raw = {};
     let anyOk = false;
@@ -161,16 +162,41 @@ async function collectBattery() {
     }
     const pct = raw.capacity !== undefined ? Number(raw.capacity) : null;
     const tempC = raw.temp !== undefined ? Number(raw.temp) / 10 : null;
-    const curMa = raw.current_now !== undefined ? Number(raw.current_now) / 1000 : null;
+
+    /**
+     * 电流量纲自适应（OPPO/ColorOS 实测坑）：
+     * Android 标准是 µA，但某些 OEM 节点直接给 mA。
+     * 判据：与电压一起看功率。4.47V 下 |I| 若当 µA 算只有毫瓦级 → 实际单位是 mA。
+     * 阈值用 10000：标准 µA 的充电电流通常是几十万到几百万µA，
+     * 而 mA 表示的通常是几百到几千。落在这两者之间的极少数情况按 mA 处理（更保守）。
+     */
+    let curMa = null;
+    if (raw.current_now !== undefined) {
+        const cur = Number(raw.current_now);
+        if (Number.isFinite(cur)) {
+            curMa = Math.abs(cur) >= 10000 ? cur / 1000 : cur;
+        }
+    }
     const voltV = raw.voltage_now !== undefined ? Number(raw.voltage_now) / 1e6 : null;
+
+    // charge_counter 单位 µAh（标准），2666000 → 2666mAh 电池容量
+    const chargeUah = raw.charge_counter !== undefined ? Number(raw.charge_counter) : null;
+
     return {
         available: true,
         percent: Number.isFinite(pct) ? pct : null,
         status: raw.status ?? null,
         health: raw.health ?? null,
         temperatureC: Number.isFinite(tempC) ? tempC : null,
-        currentMa: Number.isFinite(curMa) ? curMa : null,
-        voltageV: Number.isFinite(voltV) ? voltV : null,
+        currentMa: Number.isFinite(curMa) ? Math.round(curMa * 10) / 10 : null,
+        voltageV: Number.isFinite(voltV) ? Math.round(voltV * 100) / 100 : null,
+        // 功率：负数=放电，正数=充电（按 status 归一，避免 OEM 符号约定不一致）
+        powerW:
+            Number.isFinite(curMa) && Number.isFinite(voltV)
+                ? Math.round(((Math.abs(curMa) / 1000) * voltV) * 100) / 100
+                : null,
+        chargeCounterUah: Number.isFinite(chargeUah) ? chargeUah : null,
+        cycleCount: raw.cycle_count !== undefined ? Number(raw.cycle_count) : null,
     };
 }
 
@@ -339,9 +365,17 @@ function apply(ctx) {
                     out.battery = await collectBattery();
                     out.collected.push("battery");
                     if (out.battery.available) {
-                        parts.push(
-                            `电量 ${out.battery.percent ?? "?"}%${out.battery.status ? `(${out.battery.status})` : ""}`
-                        );
+                        let b = `电量 ${out.battery.percent ?? "?"}%${out.battery.status ? `(${out.battery.status})` : ""}`;
+                        if (out.battery.powerW !== null && out.battery.powerW > 0) {
+                            const dir =
+                                out.battery.status === "Charging"
+                                    ? "充入"
+                                    : out.battery.status === "Discharging"
+                                      ? "放出"
+                                      : "功率";
+                            b += `，${dir} ${out.battery.powerW}W`;
+                        }
+                        parts.push(b);
                     }
                 }
                 if (want.has("temp")) {
