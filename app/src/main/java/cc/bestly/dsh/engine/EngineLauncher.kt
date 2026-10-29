@@ -130,8 +130,7 @@ object EngineLauncher {
         if (freePort == null) {
             appendLog("!! 没有任何候选端口可绑 —— 这是进程 SELinux 域的限制，不是端口冲突")
             _state.value = EngineState.Failed(
-                "本进程无法绑定任何 TCP 端口（SELinux 域限制）",
-                portReport.joinToString("\n")
+                "本进程无法绑定任何 TCP 端口（SELinux 域限制）\n" + portReport.joinToString("\n")
             )
             return
         }
