@@ -352,6 +352,31 @@ function apply(ctx) {
                         summary: { type: "string" },
                     },
                 },
+                render: (_a, v) => {
+                    if (!v.ok) return [{ type: "text", text: `phone_health 失败：${v.error || "未知错误"}` }];
+                    const lines = [`手机健康（root ${v.rootAvailable ? "可用" : "不可用"}）`];
+                    if (v.battery) {
+                        const b = v.battery;
+                        if (b.available === false) lines.push(`- 电量：不可用（${b.reason || "需要 root"}）`);
+                        else lines.push(`- 电量：${b.percent}%（${b.status || "?"}）${b.powerW != null ? ` ${b.powerW}W` : ""}${b.temperatureC != null ? ` 电池 ${b.temperatureC}℃` : ""}`);
+                    }
+                    if (v.thermal) {
+                        const t = v.thermal;
+                        if (t.available === false) lines.push(`- 温度：不可用（${t.reason || "?"}）`);
+                        else lines.push(`- 温度：CPU 最高 ${t.cpuMaxC ?? "?"}℃${t.shellC != null ? ` / 外壳 ${t.shellC}℃` : ""}${t.hottestZone ? `（最热 ${t.hottestZone}）` : ""}`);
+                    }
+                    if (v.storage && v.storage.available !== false) {
+                        lines.push(`- 存储：剩 ${v.storage.freeGb ?? "?"}G / 共 ${v.storage.totalGb ?? "?"}G（已用 ${v.storage.usedPercent ?? "?"}%）`);
+                    }
+                    if (v.memory && v.memory.available !== false) {
+                        lines.push(`- 内存：${v.memory.usedPercent ?? "?"}% 已用${v.memory.availableMb != null ? `（可用 ${v.memory.availableMb}M）` : ""}`);
+                    }
+                    if (v.foreground && v.foreground.available !== false && v.foreground.package) {
+                        lines.push(`- 前台：${v.foreground.package}`);
+                    }
+                    if (v.summary) lines.push("", v.summary);
+                    return [{ type: "text", text: lines.join("\n") }];
+                },
             },
             async execute(args) {
                 const want = new Set(

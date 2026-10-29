@@ -183,6 +183,25 @@ function makeFileTool() {
                     summary: { type: "string" },
                 },
             },
+            render: (_a, v) => {
+                if (!v.ok) return [{ type: "text", text: `phone_file 失败：${v.error || "未知错误"}` }];
+                if (Array.isArray(v.entries) && v.entries.length) {
+                    const lines = [`工作区 ${v.path || "."}（${v.summary}）：`];
+                    for (const e of v.entries.slice(0, 100)) {
+                        lines.push(`- ${e.type === "dir" ? "📁" : "📄"} ${e.name}${e.size != null ? ` (${e.size}B)` : ""}`);
+                    }
+                    return [{ type: "text", text: lines.join("\n") }];
+                }
+                if (Array.isArray(v.matches) && v.matches.length) {
+                    const lines = [v.summary];
+                    for (const m of v.matches.slice(0, 50)) lines.push(`- ${m.path}:${m.line}  ${m.text}`);
+                    return [{ type: "text", text: lines.join("\n") }];
+                }
+                if (typeof v.content === "string") {
+                    return [{ type: "text", text: `${v.summary}\n\n${v.content.slice(0, 8000)}${v.truncated ? "\n…（已截断）" : ""}` }];
+                }
+                return [{ type: "text", text: v.summary || "完成" }];
+            },
         },
         async execute(args) {
             const action = String(args?.action || "list").toLowerCase();
@@ -364,6 +383,21 @@ function makeLocationTool() {
                     summary: { type: "string" },
                 },
             },
+            render: (_a, v) => {
+                if (!v.ok) return [{ type: "text", text: `phone_location 失败：${v.error || "未知错误"}` }];
+                if (!v.available) {
+                    return [{ type: "text", text: `位置不可用：${v.error || "无数据"}\n${v.summary || ""}` }];
+                }
+                const lines = [
+                    `当前位置：${v.latitude}, ${v.longitude}`,
+                    `精度：±${v.accuracyM}m（来源 ${v.provider}）`,
+                    v.locationEnabled === false ? "⚠ 系统定位开关是关的（这是历史缓存位置）" : "",
+                    `本地时间：${v.localTime} ${v.timezone}`,
+                    "",
+                    "提示：这里只有坐标，没有地址。需要地址就再查一次（例如用逆地理编码服务）。",
+                ].filter(Boolean);
+                return [{ type: "text", text: lines.join("\n") }];
+            },
         },
         async execute() {
             const tz = await asRoot("getprop persist.sys.timezone");
@@ -445,6 +479,13 @@ function makeContactsTool() {
                     contacts: { type: "array", items: { type: "object", additionalProperties: true } },
                     summary: { type: "string" },
                 },
+            },
+            render: (_a, v) => {
+                if (!v.ok) return [{ type: "text", text: `phone_contacts 失败：${v.error || "未知错误"}` }];
+                if (!v.available) return [{ type: "text", text: `联系人不可用：${v.error || ""}` }];
+                const lines = [v.summary];
+                for (const c of (v.contacts || [])) lines.push(`- ${c.name}：${(c.phones || []).join(" / ")}`);
+                return [{ type: "text", text: lines.join("\n") }];
             },
         },
         async execute(args) {
@@ -530,6 +571,18 @@ function makeCalendarTool() {
                     created: { type: "object", additionalProperties: true },
                     summary: { type: "string" },
                 },
+            },
+            render: (_a, v) => {
+                if (!v.ok) return [{ type: "text", text: `phone_calendar 失败：${v.error || "未知错误"}` }];
+                if (!v.available) return [{ type: "text", text: `日历不可用：${v.error || ""}` }];
+                if (v.created) {
+                    return [{ type: "text", text: `已创建：${v.created.title}\n开始 ${v.created.start}\n结束 ${v.created.end}` }];
+                }
+                const lines = [v.summary];
+                for (const e of (v.events || [])) {
+                    lines.push(`- ${e.start} → ${e.end}  ${e.title}${e.allDay ? "（全天）" : ""}${e.location ? ` @${e.location}` : ""}`);
+                }
+                return [{ type: "text", text: lines.join("\n") }];
             },
         },
         async execute(args) {
