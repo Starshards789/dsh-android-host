@@ -14,3 +14,8 @@ captures/
 *.apk
 *.aab
 apk-out/
+
+# 信任根私钥（绝不入库）
+dsh-trust.key
+dsh-trust/
+*.key

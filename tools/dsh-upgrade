@@ -15,6 +15,11 @@
 #   dsh-upgrade upgrade <version>   升级（如 0.2.1-rc.4）
 #   dsh-upgrade rollback            回滚到最近备份
 #   dsh-upgrade list                列出所有备份/新目录
+#   dsh-upgrade verify [dir]        校验信任链（Ed25519 签名 + 关键文件哈希）
+#
+# 关于「能锁」：签名私钥只存在于开发机（另外存进 Vaultwarden），
+# 绝不部署到设备。所以升级后新版本必然处于「未签名」状态，
+# 需要在开发机上补签（见 docs/trust.md），再用 verify 确认。
 
 set -u
 
@@ -26,6 +31,8 @@ DROOT=$PAYLOAD/dshroot
 DROOT_NEW=$PAYLOAD/dshroot.new
 STAGE=/data/local/tmp/dsh-stage
 PATCH=/data/adb/dsh-tools/patches/node-addon-require-builtin.android.js
+TRUST=/data/adb/dsh-tools/dsh-trust.js
+TRUST_PUB=/data/adb/dsh-tools/dsh-trust.pub
 UID_APP=$(stat -c %u "$PAYLOAD" 2>/dev/null || echo "")
 GID_APP=$(stat -c %g "$PAYLOAD" 2>/dev/null || echo "")
 CTX=$(stat -c %C "$DROOT" 2>/dev/null || echo "")
@@ -207,6 +214,7 @@ cmd_upgrade() {
     rm -rf "$BROKEN"    # 切换成功，中间态删除；回滚弹药是 dshroot.bak-$CUR
     log "✓✓ 升级成功：$CUR → $VER"
     log "回滚命令: dsh-upgrade rollback"
+    log "提醒: 新版本尚未签入信任链，需在开发机补签后 dsh-upgrade verify 确认"
     return 0
   fi
 
@@ -243,8 +251,17 @@ cmd_rollback() {
   log "✓ 回滚完成"
 }
 
+cmd_verify() {
+  local dir="${1:-$DROOT}"
+  [ -f "$TRUST" ] || die "信任根工具缺失: $TRUST"
+  [ -f "$TRUST_PUB" ] || die "公钥缺失: $TRUST_PUB"
+  dsh_env
+  node "$TRUST" verify "$dir" --pub "$TRUST_PUB"
+}
+
 case "${1:-status}" in
   status)   cmd_status ;;
+  verify)   shift; cmd_verify "${1:-}" ;;
   list)     cmd_list ;;
   upgrade)  shift; cmd_upgrade "${1:-}" ;;
   rollback) cmd_rollback ;;

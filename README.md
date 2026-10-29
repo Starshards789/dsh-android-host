@@ -8,7 +8,7 @@ Android 宿主 App for [dsh](https://github.com/deepseek-ai/dsh) —— 给自�
 
 ## 现在是什么状态
 
-**P1.0 / P1.1 / P1.2 / P1.4 / P3 全部完成并上机实测。P1.3（App 内 WebView）代码完成，但被系统 WebView 版本卡住 —— 已用 P1.4 绕开。**
+**P1.0 / P1.1 / P1.2 / P1.4 / P2 / P3 全部完成并上机实测。P1.3（App 内 WebView）代码完成，但被系统 WebView 版本卡住 —— 已用 P1.4 绕开。**
 
 ```
 App 启动 → LaunchedEffect → EngineService(前台服务)
@@ -81,6 +81,39 @@ SameSite=Strict）→ 带 cookie 再请求才是 `200`。所以用 curl 验证�
 
 **这条路的意义**：绕开系统 WebView 版本限制，而且不牺牲安全性 ——
 服务只在加密 mesh 内网可达，不暴露公网、不暴露局域网。
+
+## 升级闸门（P2）：能看 / 能升 / 能退 / 能锁
+
+dsh 还是 beta，官方更新快，所以「能方便地升级」本身是硬需求。
+`tools/dsh-upgrade` + `tools/dsh-trust.js` 把这四件事做实：
+
+| 能力 | 命令 | 实测（2026-10-29） |
+|---|---|---|
+| **能看** | `dsh-upgrade status` | 当前 `0.2.1-rc.2` + 官方 dist-tags（latest=rc.2 / next=rc.4 / alpha=alpha.2） |
+| **能升** | `dsh-upgrade upgrade 0.2.1-rc.4` | ✅ 4 分钟完成，引擎 `401` 就绪 |
+| **能退** | `dsh-upgrade rollback` | ✅ 16 秒回滚，引擎 `401` 就绪 |
+| **能锁** | `dsh-upgrade verify` | ✅ Ed25519 验签 + 关键文件哈希，两组篡改攻击均被抓 |
+
+### 四条硬约束（每条都是踩出来的）
+
+| # | 约束 | 不遵守的后果 |
+|---|---|---|
+| 1 | **Android 适配 patch 必须重打** | 新版必然以 `No usable native binding found for node-addon-require-builtin-android-arm64` 起不来。上游该模块依赖平台专属 `.node`，而安卓没有产物；这个 App 的 payload 也不带任何 `.node`/`.so`。社区壳把它改成了 js-fallback（走 `--expose-internals`），补丁存于 `docs/patches/` |
+| 2 | **`npm install` 必须 `--ignore-scripts`** | `koffi` / `node-pty` 需要 node-gyp 原生编译，安卓无工具链，直接失败 |
+| 3 | **副本必须修 SELinux context** | `cp -a` 会丢 MCS category（`s0:c37,c257,c512,c768` → `s0`），引擎起不来 |
+| 4 | **npm 装出的是扁平布局** | 社区壳原装是嵌套（依赖在 `dsh/node_modules/`），npm 装在顶层。patch 路径与校验逻辑必须同时兼容两种布局 |
+
+### 闸门已经证明过价值
+
+演练升到 `0.2.1-rc.4` 时：引擎起来了、HTTP 也通，但**完整页面返回 404**；
+同一套访问命令在 `rc.2` 上返回 `200 / 37,637B / <title>DeepSeek Harness</title>`。
+
+**结论：当前不该升 rc.4。** 没有这道闸门，盲目追新就会撞上这个坑还得手工救。
+
+### 信任根
+
+私钥只在开发机（另存 Vaultwarden），设备只持公钥（能验不能签）。
+详见 [`docs/trust.md`](docs/trust.md)。
 
 ## ⚠️ 已知限制：内置 WebView 需要 Chrome 119+
 
@@ -155,7 +188,7 @@ minTargetSdkVersion=26 → domain=untrusted_app_27   levelFrom=user
 | P1.3 | 内置 WebView，App 内直接对话 | ⚠️ 代码完成，系统 WebView 117 卡住 |
 | **P1.4** | **引擎绑 Tailscale 地址，浏览器直连完整 UI** | **✅ 完成（绕开 P1.3 限制）** |
 | P3 | 保活：前台服务 + 开机自启 + 冻结检测 | ✅ 完成 |
-| P2 | 升级闸门：清单签名 + 白名单 + 回滚 | 待办 |
+| **P2** | **升级闸门：能看 / 能升 / 能退 / 能锁** | **✅ 完成（2026-10-29 实测）** |
 | P4 | 插件体系 | 待办 |
 
 ### 为什么 P1.2 没做 Unix socket IPC
@@ -175,8 +208,12 @@ minTargetSdkVersion=26 → domain=untrusted_app_27   levelFrom=user
 ## 目录
 
 ```
-docs/design-v2.md     完整设计文档（架构、阶段拆解、实测数据、踩坑记录）
-tools/host-guard      root 冻结守护脚本（Magisk service.d 拉起）
+docs/design-v2.md                完整设计文档（架构、阶段拆解、实测数据、踩坑记录）
+docs/trust.md                    信任根说明（签名/验签/补签流程、已知边界）
+docs/patches/                    Android 适配补丁（升级时必须重打）
+tools/dsh-upgrade                升级闸门（能看/能升/能退/能锁）
+tools/dsh-trust.js               信任根工具（keygen/sign/verify）
+tools/host-guard                 root 冻结守护脚本（Magisk service.d 拉起）
 app/                  Android 宿主源码
 ```
 
