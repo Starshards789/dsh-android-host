@@ -218,7 +218,7 @@ private fun stateTitle(s: EngineState): String = when (s) {
 }
 
 private fun stateSubtitle(s: EngineState): String = when (s) {
-    is EngineState.Idle -> "点「启动引擎」开始 · 端口 13081"
+    is EngineState.Idle -> "点「启动引擎」开始 · 端口由系统分配"
     is EngineState.Starting -> "正在 fork node 并等待引擎自报就绪"
     is EngineState.Running -> "引擎已就绪，端口与 token 可被外部读取"
     is EngineState.Failed -> s.reason

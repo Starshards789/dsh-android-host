@@ -86,78 +86,38 @@ object EngineLauncher {
     // ---------- 启动 ----------
 
     /**
-     * 找一个本进程能真正 bind 的本地端口。
-     *
-     * 为什么需要这个：实测 3081 被旧壳占用（Node 报 EACCES 而非 EADDRINUSE，
-     * 极易误判），换成 13081 后仍然 EACCES —— 而 ss 显示 13081 根本没人占用。
-     * 说明限制来自进程自身的 SELinux 域（untrusted_app_27），不是端口冲突。
-     * 旧壳能绑 3080 是因为它的域带 c28,c257 这些 category，我们的没有。
-     *
-     * 所以启动前用 Java 侧 ServerSocket 亲自试一遍：Java 能绑的，Node 才可能绑。
-     * 全都不行就把实际错误暴露到日志里，不要让它伪装成"引擎起不来"。
-     */
-    private fun probePorts(ctx: Context): Pair<Int?, List<String>> {
-        val candidates = listOf(13081, 13082, 13091, 25080, 35080, 45678, 3080)
-        val report = mutableListOf<String>()
-        for (p in candidates) {
-            try {
-                ServerSocket(p, 8, InetAddress.getByName("127.0.0.1")).use { }
-                report.add("$p OK")
-                return p to report
-            } catch (e: Exception) {
-                report.add("$p FAIL ${e.javaClass.simpleName}: ${e.message}")
-            }
-        }
-        return null to report
-    }
-
-    /**
      * 启动引擎。
      *
-     * 端口默认 13081 —— 不能复用 3080/3081：旧壳 com.deepseek.harness 的引擎
-     * 占 3080，它的另一个进程占 3081。而 Node 绑被占用端口时报的是 EACCES
-     * 而不是 EADDRINUSE，极易误判成权限/SELinux 问题（实测踩过）。
+     * 端口一律交给 OS 分配（`--port 0`）。原因：固定端口会撞车 —— 3080/3081 被旧壳
+     * 占用，而 Node 绑被占端口报的是 EACCES 而不是 EADDRINUSE，看起来像权限问题
+     * （踩过一次）。dsh 支持 `--port 0`，实际端口从它打印的 URL 里读。
      */
-    fun start(ctx: Context, scope: CoroutineScope, port: Int = 13081) {
+    fun start(ctx: Context, scope: CoroutineScope) {
         if (_state.value is EngineState.Running || _state.value is EngineState.Starting) {
             Log.w(TAG, "already starting/running, ignore")
             return
         }
 
-        // 先探端口：把真实的可绑性写进日志，避免再把 SELinux 拒绝误读成端口冲突
-        val (freePort, portReport) = probePorts(ctx)
-        appendLog("端口探测: " + portReport.joinToString(" | "))
-        if (freePort == null) {
-            appendLog("!! 没有任何候选端口可绑 —— 这是进程 SELinux 域的限制，不是端口冲突")
-            _state.value = EngineState.Failed(
-                "本进程无法绑定任何 TCP 端口（SELinux 域限制）\n" + portReport.joinToString("\n")
-            )
-            return
-        }
-        appendLog("选用端口 $freePort")
-        val usePort = freePort
-
         val missing = preflight(ctx)
         if (missing.isNotEmpty()) {
-            _state.value = EngineState.Failed("环境不全: " + missing.joinToString("; "))
+            _state.value = EngineState.Failed("环境不全：" + missing.joinToString("；"))
             return
         }
 
         _state.value = EngineState.Starting
-        appendLog("=== 启动引擎 (port=$usePort) ===")
+        appendLog("=== 启动引擎（端口由系统分配）===")
 
         readerJob = scope.launch(Dispatchers.IO) {
             try {
-                doStart(ctx, usePort)
+                doStart(ctx)
             } catch (e: Exception) {
-                Log.e(TAG, "start failed", e)
-                _state.value = EngineState.Failed(e.message ?: e.toString())
+                _state.value = EngineState.Failed("启动异常: ${e.message}")
                 appendLog("启动异常: ${e.message}")
             }
         }
     }
 
-    private suspend fun doStart(ctx: Context, port: Int) = withContext(Dispatchers.IO) {
+    private suspend fun doStart(ctx: Context) = withContext(Dispatchers.IO) {
         val payload = payloadDir(ctx)
         val dshHome = dshHomeDir(ctx).apply { mkdirs() }
         val runtime = runtimeDir(ctx).apply { mkdirs() }
@@ -170,7 +130,8 @@ object EngineLauncher {
             dshEntry(ctx).absolutePath,
             "web",
             "--host", "127.0.0.1",
-            "--port", port.toString(),
+            "--no-open",
+            "--port", "0",
         )
         appendLog("cmd: ${cmd.joinToString(" ")}")
 
@@ -220,19 +181,33 @@ object EngineLauncher {
 
                 if (!gotUrl) {
                     URL_REGEX.find(line)?.let { m ->
-                        gotUrl = true
-                        val p = m.groupValues[1].toIntOrNull() ?: port
                         val token = m.groupValues[2]
+                        val p = m.groupValues[1].toIntOrNull()
 
-                        // ★ 稳定状态文件：路径固定，内容可变。
-                        // 外部订阅方（iptables 转发脚本、信箱直投）读这两个文件，
-                        // 而不是去猜端口 —— 这是零八 2026-10-29 审阅时明确要求的。
-                        File(runtime, "port").writeText(p.toString())
-                        File(runtime, "token").writeText(token)
-                        File(runtime, "pid").writeText(pid.toString())
+                        if (p == null) {
+                            appendLog("!! 日志里的端口解析失败: ${line.take(120)}")
+                        } else {
+                            // 抓到 URL 不等于服务真的能用 —— 再做一次 HTTP 确认。
+                            // 这是「进程存在 ≠ 服务可用」那条教训的延伸：
+                            // 日志打出 URL ≠ 端口真的在听（可能端口刚被抢、进程正在崩）。
+                            val code = httpProbe(p)
+                            if (code > 0) {
+                                gotUrl = true   // 只有 HTTP 真的应答了才停止寻找
+                                appendLog("HTTP 确认 port=$p -> $code")
 
-                        _state.value = EngineState.Running(pid, p, token)
-                        appendLog("=== 就绪: port=$p ===")
+                                // ★ 稳定状态文件：路径固定，内容可变。
+                                // 外部订阅方（iptables 转发脚本、信箱直投）读这两个文件，
+                                // 而不是去猜端口 —— 这是零八 2026-10-29 审阅时明确要求的。
+                                File(runtime, "port").writeText(p.toString())
+                                File(runtime, "token").writeText(token)
+                                File(runtime, "pid").writeText(pid.toString())
+
+                                _state.value = EngineState.Running(pid, p, token)
+                                appendLog("=== 就绪: port=$p http=$code ===")
+                            } else {
+                                appendLog("!! port=$p 已打印 URL 但 HTTP 无响应，继续等")
+                            }
+                        }
                     }
                 }
             }
@@ -288,6 +263,22 @@ object EngineLauncher {
      * Unresolved reference。安卓的 ProcessImpl/UNIXProcess 有私有字段 pid，
      * 反射读它；读不到就返回 -1（pid 只用于展示和写 runtime/pid，缺了不影响启动）。
      */
+    /**
+     * 打一次本机 HTTP 请求，返回状态码（-1 表示连不上）。
+     * 用来把「日志里出现了 URL」升级成「端口真的能应答」。
+     */
+    private fun httpProbe(port: Int): Int = try {
+        val conn = java.net.URL("http://127.0.0.1:$port/").openConnection() as java.net.HttpURLConnection
+        conn.connectTimeout = 4000
+        conn.readTimeout = 4000
+        conn.requestMethod = "GET"
+        val code = conn.responseCode
+        conn.disconnect()
+        code
+    } catch (_: Exception) {
+        -1
+    }
+
     private fun pidOf(p: Process): Int = try {
         val f = p.javaClass.getDeclaredField("pid")
         f.isAccessible = true
