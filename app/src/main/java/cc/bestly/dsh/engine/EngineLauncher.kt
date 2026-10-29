@@ -318,7 +318,7 @@ object EngineLauncher {
                             File(runtime, "token").writeText(token)
                             File(runtime, "pid").writeText(pid.toString())
 
-                            _state.value = EngineState.Running(pid, p, token)
+                            _state.value = EngineState.Running(pid, p, token, bindHost)
                             appendLog("=== 就绪: port=$p probe=$code ===")
                         }
                     }
@@ -424,6 +424,6 @@ object EngineLauncher {
 sealed interface EngineState {
     data object Idle : EngineState
     data object Starting : EngineState
-    data class Running(val pid: Int, val port: Int, val token: String) : EngineState
+    data class Running(val pid: Int, val port: Int, val token: String, val host: String) : EngineState
     data class Failed(val reason: String) : EngineState
 }

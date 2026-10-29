@@ -80,6 +80,8 @@ fun EngineScreen(activity: ComponentActivity) {
 
     // 对话模式：全屏 WebView 直接加载引擎的 Web UI。
     // token 走 URL 参数 —— 这是 dsh 唯一的认证方式（没有 header 认证）。
+    var copiedHint by remember { mutableStateOf(false) }
+
     if (showWeb && runningState != null) {
         EngineWebView(
             port = runningState.port,
@@ -129,8 +131,32 @@ fun EngineScreen(activity: ComponentActivity) {
                     Spacer(Modifier.height(10.dp))
                     Text("PID    ${s.pid}", fontSize = 12.sp, color = Color.White, fontFamily = FontFamily.Monospace)
                     Text("PORT   ${s.port}", fontSize = 12.sp, color = Color.White, fontFamily = FontFamily.Monospace)
-                    Text("TOKEN  ${s.token.take(16)}…", fontSize = 12.sp, color = Color.White, fontFamily = FontFamily.Monospace)
-                    Spacer(Modifier.height(6.dp))
+                    // 完整 token：截断显示会让人无法在浏览器里完成首次认证
+                    Text(
+                        "TOKEN  ${s.token}",
+                        fontSize = 11.sp,
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    // 首次访问必须带 token 才能种 cookie；一键复制省掉手拼长串
+                    val ctxCopy = LocalContext.current
+                    Button(
+                        onClick = {
+                            val url = "http://${s.host}:${s.port}/?token=${s.token}"
+                            val cm = ctxCopy.getSystemService(
+                                android.content.Context.CLIPBOARD_SERVICE
+                            ) as android.content.ClipboardManager
+                            cm.setPrimaryClip(
+                                android.content.ClipData.newPlainText("dsh url", url)
+                            )
+                            copiedHint = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (copiedHint) "已复制，去浏览器粘贴" else "复制访问链接")
+                    }
+                    Spacer(Modifier.height(4.dp))
                     Text(
                         "files/runtime/port 与 /token 已写入",
                         fontSize = 11.sp,
