@@ -69,6 +69,16 @@ fun EngineScreen(activity: ComponentActivity) {
     val missing = remember { EngineLauncher.preflight(activity) }
     val running = state is EngineState.Running || state is EngineState.Starting
 
+    // 打开 App 就自动拉起引擎 —— 这才是宿主该干的事。
+    // P1.1 一开始做成手动点按钮，但 targetSdk 27 的兼容模式下 adb input tap
+    // 的坐标不可靠（uiautomator 报的 bounds 和实际触摸目标不一致），反复点不中。
+    // 而且真实产品形态本来就是：用户打开 App，引擎就该起来。
+    LaunchedEffect(Unit) {
+        if (EngineLauncher.state.value is EngineState.Idle) {
+            EngineLauncher.start(activity, scope)
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
