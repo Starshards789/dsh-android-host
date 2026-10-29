@@ -8,16 +8,17 @@ Android 宿主 App for [dsh](https://github.com/deepseek-ai/dsh) —— 给自�
 
 ## 现在是什么状态
 
-**P1.2 完成** —— App 已经能自己把 dsh 引擎拉起来并对外提供服务。
+**P1.0 / P1.1 / P1.2 / P3 全部完成并上机实测。P1.3 代码完成，但被系统 WebView 版本卡住。**
 
 ```
-App 启动 → LaunchedEffect → EngineLauncher.start()
-  → probePorts() 选一个真能 bind 的端口
-  → ProcessBuilder(payload/runtime/bin/node
-                   --expose-internals dsh/lib/bin.js web ...)
-  → 显式构造 6 个环境变量，并剥离子进程里所有密钥类变量
-  → 从 stdout 抓 http://127.0.0.1:<port>/?token=<token>
-  → 写 files/runtime/{port, token, pid}
+App 启动 → LaunchedEffect → EngineService(前台服务)
+  → EngineLauncher.start()
+    → probePorts() 选一个真能 bind 的端口
+    → ProcessBuilder(payload/runtime/bin/node
+                     --expose-internals dsh/lib/bin.js web ...)
+    → 显式构造 6 个环境变量，并剥离子进程里所有密钥类变量
+    → 从 stdout 抓 http://127.0.0.1:<port>/?token=<token>
+    → 写 files/runtime/{port, token, pid}
 ```
 
 **App 用自己的 uid 跑引擎，不需要 root。** 和社区壳的做法同构，但引擎内核一行没改。
@@ -31,6 +32,50 @@ App 启动 → LaunchedEffect → EngineLauncher.start()
 | 端口 | 写入 `runtime/port`，LISTEN 确认 |
 | 鉴权 | 无 token → `401`，带 token → `303` |
 | 启动到可读状态文件 | < 10 秒 |
+| 与旧壳并存 | 新宿主 13081 / 旧壳 3080，互不干扰 |
+
+---
+
+## 保活（P3，已完成）
+
+ColorOS 会用 **cgroup freezer** 冻结整个 uid，前台服务不足以对抗。
+
+| 层 | 手段 | 效果 |
+|---|---|---|
+| 1 | `EngineService` 前台服务 | 进程不参与常规回收 |
+| 2 | `BootReceiver`（`BOOT_COMPLETED` + `MY_PACKAGE_REPLACED`） | 开机/升级后自动拉起 |
+| 3 | root 守护 `host-guard`（120 秒兜底） | 检测 `cgroup.freeze=1` → 解冻 + `am start` |
+| 4 | **ColorOS 三开关**（允许完全后台行为 / 允许应用启动 / 允许应用关联启动） | **根治**：息屏 5 分钟 10 次采样 `freeze=0` / `curl=401` |
+
+**关键实证**：解冻后必须 `am start` 拉前台，否则 I/O 不活（只 `echo 0` 仍 `curl=000`）。
+`deviceidle whitelist` 与 ColorOS `no_frozen` 名单**均无效**。
+
+---
+
+## ⚠️ 已知限制：内置 WebView 需要 Chrome 119+
+
+P1.3 已在 App 内做了 WebView 对话页（`usesCleartextTraffic` + token 注入 + 全屏），实测：
+
+- ✅ dsh UI 能加载（预览说明、新建会话、插件、自动化任务、全局面板都渲染）
+- ❌ 前端抛 `Promise.withResolvers is not a function` → `[session-controller] control stream failed` → 输入框与发送按钮不渲染
+
+**根因不是宿主代码**：本项目设备系统 WebView 为 `com.google.android.webview 117.0.5938.60`（2024-01），而 dsh 前端用了 Chrome 119+ 才有的 ES2024 API。
+
+第三方与 Play 均无法更新它，原因见下表：
+
+| 渠道 | 结果 |
+|---|---|
+| APKPure / Uptodown / APKMirror | 反爬 403 / Cloudflare 挑战页 |
+| Aptoide | 只有 x86（151MB）与 32 位（94MB），**无 arm64** |
+| Play 商店 | 下载成功，**安装被拒**（`status_code=6581`，`installerPackageName=null`） |
+
+**为什么第三方拿不到 arm64**：WebView 在 Play 上走 App Bundle，按设备分发 split APK，第三方站点存的都是模拟器 x86 包。
+
+**唯一正路是系统 OTA**（厂商定制包 `WebViewGoogleCN` 受保护）。
+
+> 顺带修掉的一个真实 bug：Play 下载长期停在 0%，原因是代理规则把 Google 下载 CDN
+> （`gvt1.com` / `gvt2.com` / `gvt3.com` / punycode `xn--ngstr-lra8j.com`）设为 `DIRECT`。
+> 改为走代理并热重载后恢复正常。
 
 ---
 
@@ -72,12 +117,14 @@ minTargetSdkVersion=26 → domain=untrusted_app_27   levelFrom=user
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
+| P0 | 旧壳引擎看护（崩溃/重启自愈） | ✅ 完成 |
+| P0.5 | payload 备份校验（747M / 47,523 文件） | ✅ 完成 |
 | P1.0 | 构建链（GitHub Actions → 可安装 APK） | ✅ 完成 |
 | P1.1 | 宿主骨架：fork 引擎 + 环境变量 + 稳定状态文件 | ✅ 完成 |
 | P1.2 | 端口探测 + 就绪判定（放弃 IPC，理由见下） | ✅ 完成 |
-| P1.3 | 内置 WebView，App 内直接对话 | 进行中 |
+| P1.3 | 内置 WebView，App 内直接对话 | ⚠️ 代码完成，系统 WebView 117 卡住 |
+| P3 | 保活：前台服务 + 开机自启 + 冻结检测 | ✅ 完成 |
 | P2 | 升级闸门：清单签名 + 白名单 + 回滚 | 待办 |
-| P3 | 保活：前台服务 + 开机自启 + 冻结检测 | 待办 |
 | P4 | 插件体系 | 待办 |
 
 ### 为什么 P1.2 没做 Unix socket IPC
@@ -92,6 +139,15 @@ minTargetSdkVersion=26 → domain=untrusted_app_27   levelFrom=user
 - **四层独立更新**：Node 运行时 / dsh 内核 / 插件 / 数据记忆。
 - **引擎绝不打进 APK**：否则每次升级 dsh 都要重装 App。
 - **探针坏了不许连累主流程**：引擎能打印带 token 的 URL 本身就是就绪信号。
+- **7×24 必须可靠的放服务器**；必须摸手机的放手机，并接受它随时可能离线。
+
+## 目录
+
+```
+docs/design-v2.md     完整设计文档（架构、阶段拆解、实测数据、踩坑记录）
+tools/host-guard      root 冻结守护脚本（Magisk service.d 拉起）
+app/                  Android 宿主源码
+```
 
 ## 许可
 

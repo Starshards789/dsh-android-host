@@ -1,0 +1,115 @@
+#!/system/bin/sh
+# host-guard —— cc.bestly.dsh 新宿主的守护（零一 2026-10-29）
+#
+# 为什么需要它（三层实测结论）：
+#   ① 前台服务能让进程活着，但挡不住 ColorOS 的 cgroup 冻结
+#   ② 解冻（echo 0 > cgroup.freeze）之后 curl 仍然 000 —— 只解冻不拉活，I/O 不活
+#   ③ 只有 am start 把 Activity 拉到前台，引擎才恢复响应（实测 4 秒内 401）
+#   Doze 白名单、ColorOS 的 no_frozen 名单，两个都试过，均无效。
+#
+# 所以唯一可靠的 7×24 方案是 root 侧守护：检测 → 解冻 → am start → 回桌面。
+# 比旧壳好在：App 里是 LaunchedEffect 自动拉起引擎，不需要点按钮，
+# 拉到前台几秒就够，然后立刻 home 退回，用户只会看到一闪。
+#
+# 用法：host-guard [间隔秒] [heal:on|off]
+#   heal=on（默认）：自动解冻 + 拉活
+#   heal=off       ：只观察记日志，不动手
+
+PKG=cc.bestly.dsh
+UIDN=10293
+CF=/sys/fs/cgroup/uid_$UIDN/cgroup.freeze
+PORTF=/data/user/0/$PKG/files/runtime/port
+LOG=/data/adb/host-guard.log
+PIDF=/data/adb/host-guard.pid
+N=${1:-30}
+HEAL=${2:-on}
+
+if [ -f "$PIDF" ] && kill -0 "$(cat $PIDF)" 2>/dev/null; then
+  echo "already running pid=$(cat $PIDF)"; exit 0
+fi
+echo $$ > "$PIDF"
+log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+log "start v1 pid=$$ interval=${N}s heal=$HEAL"
+
+# 拉活：解冻 + am start + 等就绪 + 退回桌面
+revive() {
+  local why="$1"
+  log "$why -> unfreeze + am start"
+  echo 0 > "$CF" 2>/dev/null
+  sleep 1
+
+  # 锁屏时先唤醒并上滑，否则 Activity 起在锁屏后面
+  if dumpsys window 2>/dev/null | grep -q 'mDreamingLockscreen=true'; then
+    log "lock screen detected -> wake + swipe"
+    input keyevent KEYCODE_WAKEUP 2>/dev/null
+    sleep 1
+    input swipe 540 1900 540 500 150 2>/dev/null
+    sleep 1
+  fi
+
+  # 拉起。后台启动 Activity 对 root/shell 不受 Android 10 限制。
+  am start -n $PKG/.MainActivity >/dev/null 2>&1
+
+  # 等引擎就绪（最多 20 秒）
+  local i=0
+  while [ $i -lt 20 ]; do
+    sleep 1
+    i=$((i+1))
+    local P=$(cat "$PORTF" 2>/dev/null)
+    [ -z "$P" ] && continue
+    local C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:$P/" 2>/dev/null)
+    if [ "$C" = "401" ]; then
+      log "engine UP port=$P http=401 (after ${i}s)"
+      # 退回桌面，别占着用户屏幕
+      input keyevent KEYCODE_HOME 2>/dev/null
+      log "returned to home"
+      return 0
+    fi
+  done
+  log "revive timeout after 20s (port=$(cat $PORTF 2>/dev/null))"
+  input keyevent KEYCODE_HOME 2>/dev/null
+  return 1
+}
+
+i=0; revives=0; fails=0
+while true; do
+  i=$((i+1))
+  F=$(cat "$CF" 2>/dev/null)
+  P=$(cat "$PORTF" 2>/dev/null)
+  ALIVE=$(pidof $PKG 2>/dev/null)
+  NODE=$(pidof node 2>/dev/null | tr ' ' '\n' | head -1)
+
+  if [ -z "$ALIVE" ]; then
+    log "app process GONE"
+    [ "$HEAL" = "on" ] && { am start -n $PKG/.MainActivity >/dev/null 2>&1; }
+  elif [ "$F" = "1" ]; then
+    # 冻结是最常见的：ColorOS 一进后台就冻
+    if [ "$HEAL" = "on" ]; then
+      revive "FROZEN(freeze=1)" && revives=$((revives+1)) || fails=$((fails+1))
+    else
+      log "FROZEN(freeze=1) port=${P:-无} (heal=off, 只观察)"
+    fi
+  else
+    # 没冻结时也轻量探一次，防止"进程活着但引擎死了"
+    if [ -n "$P" ]; then
+      C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:$P/" 2>/dev/null)
+      if [ "$C" != "401" ] && [ "$C" != "303" ]; then
+        if [ "$HEAL" = "on" ]; then
+          revive "engine silent(http=$C)" && revives=$((revives+1)) || fails=$((fails+1))
+        else
+          log "engine silent http=$C (heal=off)"
+        fi
+      fi
+    else
+      # 没有 port 文件 = 引擎从没起来过或 runtime 被清
+      if [ "$HEAL" = "on" ] && [ -n "$NODE" ]; then
+        log "no port file but node pid=$NODE -> revive"
+        revive "no port file" 
+      fi
+    fi
+  fi
+
+  # 每 20 轮打一次心跳，别把日志刷爆
+  [ $((i % 20)) -eq 0 ] && log "alive #$i freeze=$F port=${P:-无} revives=$revives fails=$fails"
+  sleep "$N"
+done
