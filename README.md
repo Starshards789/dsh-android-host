@@ -8,7 +8,7 @@ Android 宿主 App for [dsh](https://github.com/deepseek-ai/dsh) —— 给自�
 
 ## 现在是什么状态
 
-**P1.0 / P1.1 / P1.2 / P3 全部完成并上机实测。P1.3 代码完成，但被系统 WebView 版本卡住。**
+**P1.0 / P1.1 / P1.2 / P1.4 / P3 全部完成并上机实测。P1.3（App 内 WebView）代码完成，但被系统 WebView 版本卡住 —— 已用 P1.4 绕开。**
 
 ```
 App 启动 → LaunchedEffect → EngineService(前台服务)
@@ -51,6 +51,36 @@ ColorOS 会用 **cgroup freezer** 冻结整个 uid，前台服务不足以对抗
 `deviceidle whitelist` 与 ColorOS `no_frozen` 名单**均无效**。
 
 ---
+
+## 从浏览器访问完整 UI（P1.4，绕开 WebView 限制）
+
+dsh 的 `--host` **拒绝通配地址**（`0.0.0.0` 被直接拒绝），但允许绑某个**具体接口地址**。
+利用这一点把引擎绑到 Tailscale 地址上，界面就能在任何设备的浏览器里打开：
+
+```
+--host 100.93.28.42 --trusted-host 100.93.28.42:13081
+```
+
+- `pickBindHost()` 优先找 `tun*` / `tailscale` 接口的 IPv4（CGNAT 100.64/10）
+- 拿不到则退回 `127.0.0.1`；**绝不退回 `wlan0`**，避免把服务暴露给整个局域网
+- `--trusted-host` 必须与 `--host` 一致，否则 `/api` 的浏览器信任栅栏会拒绝（页面能开、功能不通）
+- `runtime/host` 与 `runtime/port`、`runtime/token` 一起写，供外部脚本读取
+
+**认证走 cookie 接力**：`GET /?token=<t>` → `303` + `set-cookie: dsh-auth-*`（HttpOnly,
+SameSite=Strict）→ 带 cookie 再请求才是 `200`。所以用 curl 验证时必须带 cookie jar，
+否则会误判成 401。
+
+实测（2026-10-29，本机 → 8T 经 Tailscale）：
+
+| 项 | 结果 |
+|---|---|
+| 监听地址 | `100.93.28.42:13081`（不再是 127.0.0.1） |
+| 无 token | `401` |
+| 带 token 首跳 | `303` + set-cookie |
+| 带 cookie 跟随 | `200` / **37,637 字节** / `<title>DeepSeek Harness</title>` / 6 个 script |
+
+**这条路的意义**：绕开系统 WebView 版本限制，而且不牺牲安全性 ——
+服务只在加密 mesh 内网可达，不暴露公网、不暴露局域网。
 
 ## ⚠️ 已知限制：内置 WebView 需要 Chrome 119+
 
@@ -123,6 +153,7 @@ minTargetSdkVersion=26 → domain=untrusted_app_27   levelFrom=user
 | P1.1 | 宿主骨架：fork 引擎 + 环境变量 + 稳定状态文件 | ✅ 完成 |
 | P1.2 | 端口探测 + 就绪判定（放弃 IPC，理由见下） | ✅ 完成 |
 | P1.3 | 内置 WebView，App 内直接对话 | ⚠️ 代码完成，系统 WebView 117 卡住 |
+| **P1.4** | **引擎绑 Tailscale 地址，浏览器直连完整 UI** | **✅ 完成（绕开 P1.3 限制）** |
 | P3 | 保活：前台服务 + 开机自启 + 冻结检测 | ✅ 完成 |
 | P2 | 升级闸门：清单签名 + 白名单 + 回滚 | 待办 |
 | P4 | 插件体系 | 待办 |
