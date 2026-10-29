@@ -83,7 +83,14 @@ object EngineLauncher {
 
     // ---------- 启动 ----------
 
-    fun start(ctx: Context, scope: CoroutineScope, port: Int = 3081) {
+    /**
+     * 启动引擎。
+     *
+     * 端口默认 13081 —— 不能复用 3080/3081：旧壳 com.deepseek.harness 的引擎
+     * 占 3080，它的另一个进程占 3081。而 Node 绑被占用端口时报的是 EACCES
+     * 而不是 EADDRINUSE，极易误判成权限/SELinux 问题（实测踩过）。
+     */
+    fun start(ctx: Context, scope: CoroutineScope, port: Int = 13081) {
         if (_state.value is EngineState.Running || _state.value is EngineState.Starting) {
             Log.w(TAG, "already starting/running, ignore")
             return
