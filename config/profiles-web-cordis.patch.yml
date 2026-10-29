@@ -50,3 +50,6 @@
 - insert:
     - id: tool-phone-health
       name: "dsh-tool-phone-health"
+    # 生活/设备工具包：phone_file / phone_location / phone_contacts / phone_calendar
+    - id: tool-phone-life
+      name: "dsh-tool-phone-life"

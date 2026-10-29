@@ -1,0 +1,15 @@
+{
+  "name": "dsh-tool-phone-life",
+  "version": "0.1.0",
+  "description": "Life/device tools for DeepSeek Harness on Android: workspace file ops, location, contacts, calendar. All degrade honestly when data or privilege is unavailable.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6",
+    "@deepseek-ai/cordis": "^4.0.5"
+  }
+}
