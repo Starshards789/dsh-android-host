@@ -31,6 +31,9 @@ android {
     }
     buildFeatures {
         compose = true
+        // AGP 8.0+ 默认不生成 BuildConfig 类，不显式打开就会在代码里报
+        // Unresolved reference 'BuildConfig'
+        buildConfig = true
     }
     packaging {
         resources {
