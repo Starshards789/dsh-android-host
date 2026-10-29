@@ -10,12 +10,24 @@ android {
 
     defaultConfig {
         applicationId = "cc.bestly.dsh"
-        // ★ 必须 <= 27：Android 10 (API 29) 起对 targetSdk>=28 的 app 施加 W^X 限制，
-        // 禁止从 app 私有数据目录 exec 二进制（ProcessBuilder 报 error=13 Permission denied）。
-        // targetSdk<=27 的 app 跑在兼容域 u:r:untrusted_app_27 里，允许 exec。
-        // 旧壳 com.deepseek.harness 能跑，就是因为它 targetSdk 老。
-        minSdk = 27
-        targetSdk = 27
+        // ★ targetSdk 必须正好是 28 —— 这是 /system/etc/selinux/plat_seapp_contexts 决定的：
+        //
+        //   minTargetSdkVersion=34 → domain=untrusted_app      levelFrom=all
+        //   minTargetSdkVersion=29 → domain=untrusted_app_29   levelFrom=all
+        //   minTargetSdkVersion=28 → domain=untrusted_app_27   levelFrom=all    ← 只有这条两头都满足
+        //   minTargetSdkVersion=26 → domain=untrusted_app_27   levelFrom=user
+        //
+        // 取 28 才同时拿到两件事：
+        //   ① 域仍是 untrusted_app_27（兼容域，允许从 app 数据目录 exec 二进制）
+        //   ② levelFrom=all 给出完整 MCS category（旧壳靠这个绑 3080 端口）
+        //
+        // 取 27 会掉进 levelFrom=user 那行：能 exec，但 category 不全，
+        // 连 ServerSocket 都 bind 不了（Node 报 listen EACCES，极易误判成端口冲突）。
+        // 取 29 以上则进 untrusted_app_29/32/34，失去 exec 权限。
+        //
+        // 旧壳 com.deepseek.harness 的实际值就是 minSdk=24 / targetSdk=28，实测可跑。
+        minSdk = 24
+        targetSdk = 28
         versionCode = 2
         versionName = "0.2.0"
     }
