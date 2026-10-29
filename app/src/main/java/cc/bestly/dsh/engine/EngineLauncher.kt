@@ -126,6 +126,13 @@ object EngineLauncher {
         )
         appendLog("cmd: ${cmd.joinToString(" ")}")
 
+        // 日志文件在 fork 之前就创建 —— 否则 ProcessBuilder 抛异常时什么都留不下
+        val logFile = File(runtime, "engine.log")
+        try {
+            logFile.writeText("")
+        } catch (_: IOException) {
+        }
+
         val pb = ProcessBuilder(cmd)
         pb.directory(payload)
         pb.redirectErrorStream(true)
@@ -151,9 +158,6 @@ object EngineLauncher {
         val pid = pidOf(proc)
         appendLog("pid=$pid")
         _state.value = EngineState.Starting
-
-        val logFile = File(runtime, "engine.log")
-        logFile.writeText("")   // 每次启动清空
 
         val reader = proc.inputStream.bufferedReader()
         var gotUrl = false

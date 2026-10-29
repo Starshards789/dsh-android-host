@@ -10,8 +10,12 @@ android {
 
     defaultConfig {
         applicationId = "cc.bestly.dsh"
-        minSdk = 34
-        targetSdk = 34
+        // ★ 必须 <= 27：Android 10 (API 29) 起对 targetSdk>=28 的 app 施加 W^X 限制，
+        // 禁止从 app 私有数据目录 exec 二进制（ProcessBuilder 报 error=13 Permission denied）。
+        // targetSdk<=27 的 app 跑在兼容域 u:r:untrusted_app_27 里，允许 exec。
+        // 旧壳 com.deepseek.harness 能跑，就是因为它 targetSdk 老。
+        minSdk = 27
+        targetSdk = 27
         versionCode = 2
         versionName = "0.2.0"
     }
