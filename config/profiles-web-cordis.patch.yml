@@ -42,3 +42,11 @@
   config:
     agents: []
     maxParallelToolCalls: 24
+
+# ★ 我们自己的插件（不是社区壳带回来的，是本地开发的）
+#   包放在 dshhome/profiles/web/node_modules/dsh-tool-phone-health/
+#   之所以放在 dshhome 而不是 dshroot：dshroot 会被 dsh-upgrade 整体替换，
+#   dshhome 不动 —— 这样升级 dsh 内核不会把自有插件冲掉。
+- insert:
+    - id: tool-phone-health
+      name: "dsh-tool-phone-health"

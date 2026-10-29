@@ -1,0 +1,15 @@
+{
+  "name": "dsh-tool-phone-health",
+  "version": "0.1.0",
+  "description": "Phone health snapshot for DeepSeek Harness: battery, thermal, storage, memory, foreground app. Degrades honestly when root is unavailable.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6",
+    "@deepseek-ai/cordis": "^4.0.1"
+  }
+}
