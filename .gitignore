@@ -7,3 +7,10 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+
+# 签名与产物（绝不入库）
+*.keystore
+*.jks
+*.apk
+*.aab
+apk-out/
