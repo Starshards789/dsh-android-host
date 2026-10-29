@@ -44,7 +44,8 @@ object EngineLauncher {
     private const val TAG = "EngineLauncher"
 
     /** 引擎打印的启动 URL，用于抓端口和 token */
-    private val URL_REGEX = Regex("""http://127\.0\.0\.1:(\d+)/\?token=([A-Za-z0-9_\-]+)""")
+    private val URL_REGEX =
+        Regex("""http://([0-9a-fA-F:.]+):(\d+)/\?token=([A-Za-z0-9_\-]+)""")
 
     private var process: Process? = null
     private var readerJob: Job? = null
@@ -95,12 +96,44 @@ object EngineLauncher {
      *
      * 探测出来的端口含义是「Java 侧能绑」——Java 能绑，Node 才可能绑。
      */
-    private fun probePorts(ctx: Context): Pair<Int?, List<String>> {
+    /**
+     * 选绑定地址。
+     *
+     * dsh 的 --host **拒绝通配地址**（0.0.0.0 会被直接拒绝），只能绑某个具体接口地址。
+     * 我们优先绑 Tailscale 的地址（tun*，CGNAT 段 100.64.0.0/10）：
+     *   - 它是加密 mesh 内网，只有被授权的设备能连，比绑 WiFi 局域网安全
+     *   - 绑上之后电脑/平板浏览器可直接访问 dsh 的完整 UI，绕开系统 WebView 版本限制
+     * 拿不到 Tailscale（没开/掉线）则退回 127.0.0.1 —— 绝不退回 wlan0，
+     * 否则等于把服务暴露给整个局域网。
+     */
+    private fun pickBindHost(): Pair<String, String> {
+        try {
+            val nifs = java.net.NetworkInterface.getNetworkInterfaces()
+            while (nifs.hasMoreElements()) {
+                val nif = nifs.nextElement()
+                val nm = nif.name.lowercase()
+                if (!nif.isUp || nif.isLoopback) continue
+                if (!(nm.startsWith("tun") || nm.contains("tailscale"))) continue
+                val addrs = nif.inetAddresses
+                while (addrs.hasMoreElements()) {
+                    val a = addrs.nextElement()
+                    if (a is java.net.Inet4Address && !a.isLoopbackAddress) {
+                        val h = a.hostAddress
+                        if (h != null) return h to "tailscale:$nm"
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+        }
+        return "127.0.0.1" to "fallback:loopback"
+    }
+
+    private fun probePorts(host: String): Pair<Int?, List<String>> {
         val candidates = listOf(13081, 13082, 13091, 25080, 35080, 45678)
         val report = mutableListOf<String>()
         for (p in candidates) {
             try {
-                java.net.ServerSocket(p, 8, java.net.InetAddress.getByName("127.0.0.1")).use { }
+                java.net.ServerSocket(p, 8, java.net.InetAddress.getByName(host)).use { }
                 report.add("$p OK")
                 return p to report
             } catch (e: Exception) {
@@ -130,23 +163,28 @@ object EngineLauncher {
             return
         }
 
-        // 先探端口：把真实可绑性写进日志，别再让 SELinux/权限问题伪装成端口冲突
-        val (freePort, portReport) = probePorts(ctx)
-        appendLog("端口探测: " + portReport.joinToString(" | "))
+        // 先定绑定地址，再用**同一个地址**探端口。
+        // 顺序反了会误判：127.0.0.1 空闲不代表 Tailscale 地址也空闲，反之亦然。
+        val (bindHost, hostWhy) = pickBindHost()
+        appendLog("绑定地址 $bindHost ($hostWhy)")
+
+        // 探端口：把真实可绑性写进日志，别再让 SELinux/权限问题伪装成端口冲突
+        val (freePort, portReport) = probePorts(bindHost)
+        appendLog("端口探测($bindHost): " + portReport.joinToString(" | "))
         if (freePort == null) {
             _state.value = EngineState.Failed(
-                "本进程无法绑定任何 TCP 端口\n" + portReport.joinToString("\n")
+                "本进程无法在 $bindHost 上绑定任何 TCP 端口\n" + portReport.joinToString("\n")
             )
             return
         }
         appendLog("选用端口 $freePort")
 
         _state.value = EngineState.Starting
-        appendLog("=== 启动引擎 (port=$freePort) ===")
+        appendLog("=== 启动引擎 (host=$bindHost port=$freePort) ===")
 
         readerJob = scope.launch(Dispatchers.IO) {
             try {
-                doStart(ctx, freePort)
+                doStart(ctx, freePort, bindHost)
             } catch (e: Exception) {
                 _state.value = EngineState.Failed("启动异常: ${e.message}")
                 appendLog("启动异常: ${e.message}")
@@ -154,21 +192,25 @@ object EngineLauncher {
         }
     }
 
-    private suspend fun doStart(ctx: Context, port: Int) = withContext(Dispatchers.IO) {
+    private suspend fun doStart(ctx: Context, port: Int, bindHost: String) = withContext(Dispatchers.IO) {
         val payload = payloadDir(ctx)
         val dshHome = dshHomeDir(ctx).apply { mkdirs() }
         val runtime = runtimeDir(ctx).apply { mkdirs() }
         ipcDir(ctx).mkdirs()
         File(ctx.cacheDir, "tmp").mkdirs()
 
+        val authority = "$bindHost:$port"
         val cmd = listOf(
             nodeBin(ctx).absolutePath,
             "--expose-internals",          // ← 缺这个引擎起不来
             dshEntry(ctx).absolutePath,
             "web",
-            "--host", "127.0.0.1",
+            "--host", bindHost,            // 具体接口地址；通配地址会被 dsh 拒绝
             "--no-open",
             "--port", port.toString(),
+            // /api 的浏览器信任栅栏默认只认回环；绑非回环地址时必须显式放行这个权威，
+            // 否则浏览器端 API 请求会被拒（页面能开、功能不通）。
+            "--trusted-host", authority,
         )
         appendLog("cmd: ${cmd.joinToString(" ")}")
 
@@ -218,8 +260,8 @@ object EngineLauncher {
 
                 if (!gotUrl) {
                     URL_REGEX.find(line)?.let { m ->
-                        val token = m.groupValues[2]
-                        val p = m.groupValues[1].toIntOrNull()
+                        val token = m.groupValues[3]
+                        val p = m.groupValues[2].toIntOrNull()
 
                         if (p == null) {
                             appendLog("!! 日志里的端口解析失败: ${line.take(120)}")
@@ -231,13 +273,14 @@ object EngineLauncher {
                             // 引擎能打印带 token 的 URL 本身就是就绪信号（那是它在
                             // listen 成功之后才打的）。探测失败可能只是探针自身在 App
                             // 进程里的行为问题 —— 不能因为探针坏了就把好引擎判死。
-                            val code = httpProbe(p)
+                            val code = httpProbe(bindHost, p)
                             gotUrl = true
 
                             // ★ 稳定状态文件：路径固定，内容可变。
                             // 外部订阅方（iptables 转发脚本、信箱直投）读这两个文件，
                             // 而不是去猜端口 —— 这是零八 2026-10-29 审阅时明确要求的。
                             File(runtime, "port").writeText(p.toString())
+                            File(runtime, "host").writeText(bindHost)
                             File(runtime, "token").writeText(token)
                             File(runtime, "pid").writeText(pid.toString())
 
@@ -260,6 +303,7 @@ object EngineLauncher {
             process = null
             try {
                 File(runtime, "port").delete()
+                File(runtime, "host").delete()
                 File(runtime, "token").delete()
             } catch (_: Exception) {
             }
@@ -308,12 +352,12 @@ object EngineLauncher {
      *
      * 返回状态码；-1 表示连不上。
      */
-    private fun httpProbe(port: Int): Int = try {
+    private fun httpProbe(host: String, port: Int): Int = try {
         java.net.Socket().use { sock ->
-            sock.connect(java.net.InetSocketAddress("127.0.0.1", port), 3000)
+            sock.connect(java.net.InetSocketAddress(host, port), 3000)
             sock.soTimeout = 3000
             sock.getOutputStream().apply {
-                write("GET / HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n".toByteArray())
+                write("GET / HTTP/1.0\r\nHost: $host\r\nConnection: close\r\n\r\n".toByteArray())
                 flush()
             }
             val buf = ByteArray(64)
