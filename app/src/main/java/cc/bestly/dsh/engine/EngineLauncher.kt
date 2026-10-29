@@ -227,23 +227,22 @@ object EngineLauncher {
                             // 抓到 URL 不等于服务真的能用 —— 再做一次 HTTP 确认。
                             // 这是「进程存在 ≠ 服务可用」那条教训的延伸：
                             // 日志打出 URL ≠ 端口真的在听（可能端口刚被抢、进程正在崩）。
+                            // 探测只作诊断，不决定就绪。
+                            // 引擎能打印带 token 的 URL 本身就是就绪信号（那是它在
+                            // listen 成功之后才打的）。探测失败可能只是探针自身在 App
+                            // 进程里的行为问题 —— 不能因为探针坏了就把好引擎判死。
                             val code = httpProbe(p)
-                            if (code > 0) {
-                                gotUrl = true   // 只有 HTTP 真的应答了才停止寻找
-                                appendLog("HTTP 确认 port=$p -> $code")
+                            gotUrl = true
 
-                                // ★ 稳定状态文件：路径固定，内容可变。
-                                // 外部订阅方（iptables 转发脚本、信箱直投）读这两个文件，
-                                // 而不是去猜端口 —— 这是零八 2026-10-29 审阅时明确要求的。
-                                File(runtime, "port").writeText(p.toString())
-                                File(runtime, "token").writeText(token)
-                                File(runtime, "pid").writeText(pid.toString())
+                            // ★ 稳定状态文件：路径固定，内容可变。
+                            // 外部订阅方（iptables 转发脚本、信箱直投）读这两个文件，
+                            // 而不是去猜端口 —— 这是零八 2026-10-29 审阅时明确要求的。
+                            File(runtime, "port").writeText(p.toString())
+                            File(runtime, "token").writeText(token)
+                            File(runtime, "pid").writeText(pid.toString())
 
-                                _state.value = EngineState.Running(pid, p, token)
-                                appendLog("=== 就绪: port=$p http=$code ===")
-                            } else {
-                                appendLog("!! port=$p 已打印 URL 但 HTTP 无响应，继续等")
-                            }
+                            _state.value = EngineState.Running(pid, p, token)
+                            appendLog("=== 就绪: port=$p probe=$code ===")
                         }
                     }
                 }
@@ -301,17 +300,36 @@ object EngineLauncher {
      * 反射读它；读不到就返回 -1（pid 只用于展示和写 runtime/pid，缺了不影响启动）。
      */
     /**
-     * 打一次本机 HTTP 请求，返回状态码（-1 表示连不上）。
-     * 用来把「日志里出现了 URL」升级成「端口真的能应答」。
+     * 探测端口是否真的在服务。
+     *
+     * 用裸 Socket 发一个最小 HTTP 请求，不用 HttpURLConnection —— 实测后者在 App
+     * 进程里对 127.0.0.1 探测会失败（引擎明明在 LISTEN、curl 也返回 401），
+     * 却探不出来。裸 Socket 不经过任何网络栈配置，最接近内核事实。
+     *
+     * 返回状态码；-1 表示连不上。
      */
     private fun httpProbe(port: Int): Int = try {
-        val conn = java.net.URL("http://127.0.0.1:$port/").openConnection() as java.net.HttpURLConnection
-        conn.connectTimeout = 4000
-        conn.readTimeout = 4000
-        conn.requestMethod = "GET"
-        val code = conn.responseCode
-        conn.disconnect()
-        code
+        java.net.Socket().use { sock ->
+            sock.connect(java.net.InetSocketAddress("127.0.0.1", port), 3000)
+            sock.soTimeout = 3000
+            sock.getOutputStream().apply {
+                write("GET / HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n".toByteArray())
+                flush()
+            }
+            val buf = ByteArray(64)
+            val n = sock.getInputStream().read(buf)
+            if (n <= 0) {
+                -1
+            } else {
+                // 形如 "HTTP/1.1 401 Unauthorized"
+                val head = String(buf, 0, n)
+                if (!head.startsWith("HTTP/")) {
+                    -1
+                } else {
+                    head.split(" ").getOrNull(1)?.toIntOrNull() ?: -1
+                }
+            }
+        }
     } catch (_: Exception) {
         -1
     }
