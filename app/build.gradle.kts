@@ -28,8 +28,8 @@ android {
         // 旧壳 com.deepseek.harness 的实际值就是 minSdk=24 / targetSdk=28，实测可跑。
         minSdk = 24
         targetSdk = 28
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.6.0"
     }
 
     // ★ 显式固定 debug 签名。

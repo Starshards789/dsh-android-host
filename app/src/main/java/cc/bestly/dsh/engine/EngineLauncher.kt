@@ -106,6 +106,21 @@ object EngineLauncher {
      * 拿不到 Tailscale（没开/掉线）则退回 127.0.0.1 —— 绝不退回 wlan0，
      * 否则等于把服务暴露给整个局域网。
      */
+    /**
+     * 设备是否有 root 通道。
+     * 只做二进制存在性检查（不真跑 su）—— 真跑会拖慢启动，而插件只用它决定
+     * 「是否注册 android_* 工具」，误判的代价很低（工具调用时还会再失败一次）。
+     * 覆盖 Magisk / KernelSU / APatch 的常见路径。
+     */
+    private fun hasRootChannel(): Boolean = listOf(
+        "/system/bin/su",
+        "/system/xbin/su",
+        "/sbin/su",
+        "/debug_ramdisk/su",
+        "/data/adb/ksu/bin/su",
+        "/data/adb/ap/bin/su",
+    ).any { File(it).exists() }
+
     private fun pickBindHost(): Pair<String, String> {
         try {
             val nifs = java.net.NetworkInterface.getNetworkInterfaces()
@@ -226,14 +241,33 @@ object EngineLauncher {
         pb.redirectErrorStream(true)
 
         // ★ 环境变量显式构造（不能靠继承）
+        // TMPDIR 必须「当前用户所有 + 只允许自己读写执行」：
+        // 否则 spill-local 会警告 unsafe root（祖先目录权限不达标）并跳过溢写。
+        val tmpDir = File(ctx.cacheDir, "tmp").apply {
+            mkdirs()
+            setReadable(false, false); setReadable(true, true)
+            setWritable(false, false); setWritable(true, true)
+            setExecutable(false, false); setExecutable(true, true)
+        }
+
         pb.environment().apply {
             put("PATH", "${payload}/bin:${payload}/runtime/bin:/system/bin")
             put("LD_LIBRARY_PATH", "${payload}/runtime/lib")
-            put("TMPDIR", File(ctx.cacheDir, "tmp").absolutePath)
+            put("TMPDIR", tmpDir.absolutePath)
             put("OPENSSL_CONF", "${payload}/runtime/etc/openssl.cnf")
             put("SSL_CERT_FILE", "${payload}/runtime/etc/cacert.pem")
             put("DSH_HOME", dshHome.absolutePath)
             put("HOME", ctx.filesDir.absolutePath)
+
+            // ★ 安卓能力插件（tool-android / tool-vscreen）的安全设计：
+            // 拿不到特权通道就不注册任何 android_* 工具，避免 AI 反复撞墙。
+            // 所以这里必须如实告知 —— 用二进制存在性探测，不真跑 su（省启动时间）。
+            if (hasRootChannel()) put("ROOT_AVAILABLE", "1")
+
+            // AI 的文件/shell 操作根目录：App 私有 workspace。
+            // 不设则回退引擎进程目录（= payload），在 payload 里写东西会污染内核树。
+            val workspace = File(ctx.filesDir, "workspace").apply { mkdirs() }
+            put("DSH_WORKSPACE", workspace.absolutePath)
             // 日志脱敏：绝不把密钥类变量透给子进程
             keys.filter { k ->
                 k.contains("KEY", true) || k.contains("SECRET", true) ||

@@ -1,0 +1,80 @@
+# dsh-android-patch: v5（新宿主 cc.bestly.dsh）
+#
+# 来源：社区壳 v1.20.1 的 dshhome/cordis.patch.yml，移植到自研宿主。
+# 为什么必须移植：新宿主的 payload 是从旧壳复制的，**代码**里带着 Android 适配补丁，
+# 但 dshhome 被有意跳过（含凭据），所以**配置层**一直是默认值 ——
+# 6 个安卓能力插件一个都没注册，AI 手里没有任何手机系统工具。
+#
+# 与旧壳的差异（只有一处）：
+#   connection.trustedHosts 增加 100.93.28.42:13081（新宿主端口），
+#   旧壳的 3080 保留以便旧壳仍在运行时互不干扰。
+
+# ---- 禁用：Android 上不需要或不可用的插件 ----
+- id: bash-sandbox
+  disabled: true
+# PowerShell 沙箱（Android 无 pwsh）。
+# 注意树里该条目 id 是 pwsh-sandbox（不是 dsh-pwsh-sandbox）——id 不匹配会导致禁用不生效，
+# 引擎启动时 pwsh-sandbox 去等 sandbox 服务 → pending → 启动失败。
+- id: pwsh-sandbox
+  disabled: true
+# 会话日志导出按钮（下载 ZIP）：移动端用不上
+- id: session-log-download
+  disabled: true
+# 遥测（OTel）：Android 端不上报，且是树里最大的依赖块
+- id: session-telemetry-otel
+  disabled: true
+
+# ---- 审批策略 ----
+# danger-full-access：沙箱不做隔离、审批不打断。这是移动端个人使用的合理默认。
+# 注意不要禁用 sandbox 服务本身（@deepseek-ai/dsh-sandbox-local）：
+# 0.1.7 起 ptc-runtime inject 了 sandbox，一禁用 → agent preset 全部 pending →
+# 所有会话 create/resume 直接失败。
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+    defaultPreset: danger-full-access
+
+# ---- 插入：安卓能力插件 ----
+- insert:
+    # bash 执行（替代 bash-sandbox，提供 ctx.shell）
+    # cwd 走 DSH_WORKSPACE：App 选过工作区就用它，否则回退引擎进程目录
+    - id: bash-local
+      name: '@deepseek-ai/dsh-bash-local'
+      config:
+        cwd: !!js (process.env.DSH_WORKSPACE || process.cwd())
+        timeoutMs: 60000
+    # Shizuku 特权通道
+    - id: tool-shizuku
+      name: '@deepseek-ai/dsh-tool-shizuku'
+    # 安卓系统工具：包管理 / 应用启停 / 设置读写 / 截图 / 模拟输入
+    # ⚠ 需要 ROOT_AVAILABLE=1 或 SHIZUKU_AVAILABLE=1 环境变量，否则不注册任何工具
+    - id: tool-android
+      name: '@deepseek-ai/dsh-tool-android'
+    # 无障碍屏幕助手（读屏/点击/输入/滚动/截图），需系统设置里开启无障碍服务
+    - id: tool-accessibility
+      name: '@deepseek-ai/dsh-tool-accessibility'
+    # 虚拟屏幕（独立屏操作 App + 截图理解），需特权通道 + 无障碍
+    - id: tool-vscreen
+      name: '@deepseek-ai/dsh-tool-vscreen'
+    # AI 浏览器（结构化 DOM 快照 + 稳定 ref，不是截图 OCR）
+    - id: tool-browser
+      name: '@deepseek-ai/dsh-tool-browser'
+
+# ---- 网络信任栅栏 ----
+# Tailscale 私网访问：只放行 Tailscale 地址与本机名，不放行任何局域网地址。
+- id: connection
+  config:
+    trustedHosts:
+      - '100.93.28.42'
+      - '100.93.28.42:13081'
+      - '100.93.28.42:3080'
+      - 'oneplus-8t'
