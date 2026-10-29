@@ -49,6 +49,17 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      # 固定 debug 签名。
+      # 不固定的话，每次 Actions 跑都新生成一个随机 debug keystore，
+      # 产出的 APK 签名不一致 → 覆盖升级会 INSTALL_FAILED_UPDATE_INCOMPATIBLE，
+      # 只能卸载重装，而卸载会清掉 App 私有目录里的 710M payload。
+      # AGP 的 debug 签名默认读 $HOME/.android/debug.keystore，alias=androiddebugkey / pass=android。
+      - name: Restore fixed debug keystore
+        run: |
+          mkdir -p "$HOME/.android"
+          echo "${{ secrets.DEBUG_KEYSTORE_B64 }}" | base64 -d > "$HOME/.android/debug.keystore"
+          keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android 2>/dev/null | grep -E 'SHA1|SHA256' | head -2
+
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
