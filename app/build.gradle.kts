@@ -28,8 +28,8 @@ android {
         // 旧壳 com.deepseek.harness 的实际值就是 minSdk=24 / targetSdk=28，实测可跑。
         minSdk = 24
         targetSdk = 28
-        versionCode = 7
-        versionName = "0.7.0"
+        versionCode = 8
+        versionName = "0.8.0"
     }
 
     // ★ 显式固定 debug 签名。
@@ -44,6 +44,24 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+
+        // ★ 正式签名（P5）。密钥在 Vaultwarden「DSH 安卓签名密钥 (cc.bestly.dsh)」，
+        // CI 通过 RELEASE_KEYSTORE_B64 / RELEASE_STORE_PASSWORD / RELEASE_KEY_ALIAS 注入。
+        // SHA256 指纹：62:E6:2F:47:FE:8F:DA:BB:51:A6:EB:ED:E1:D3:B3:56:A1:5C:76:14:B5:3D:56:7E:EA:0D:BC:CF:42:CE:60:09
+        // 这是 App 的身份根：一旦换签名，已安装的 App 无法覆盖升级，只能卸载重装。
+        create("release") {
+            val ksPath =
+                System.getenv("RELEASE_KEYSTORE_PATH")
+                    ?: File(System.getProperty("user.home"), "dsh-release.keystore").absolutePath
+            val ksFile = File(ksPath)
+            if (ksFile.exists()) {
+                storeFile = ksFile
+                storePassword = System.getenv("RELEASE_STORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: "dsh-release"
+                // PKCS12 只有单一口令，keyPassword 必须与 storePassword 一致
+                keyPassword = System.getenv("RELEASE_STORE_PASSWORD") ?: ""
+            }
+        }
     }
 
     buildTypes {
@@ -52,6 +70,13 @@ android {
         }
         release {
             isMinifyEnabled = false
+            // 有正式密钥就用正式签名，没有就回退 debug（保证任何环境都能出包）
+            val releaseKs =
+                System.getenv("RELEASE_KEYSTORE_PATH")
+                    ?: File(System.getProperty("user.home"), "dsh-release.keystore").absolutePath
+            signingConfig =
+                if (File(releaseKs).exists()) signingConfigs.getByName("release")
+                else signingConfigs.getByName("fixedDebug")
         }
     }
 

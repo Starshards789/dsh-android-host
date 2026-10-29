@@ -63,8 +63,29 @@ jobs:
           echo "--- 证书指纹（应恒为 FC:FF:8F:90...）---"
           keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android | grep -E 'SHA1:|SHA256:' | head -2
 
+      # ★ 正式签名密钥（P5）。密钥本体存在 Vaultwarden 条目
+      #   「DSH 安卓签名密钥 (cc.bestly.dsh)」，这里从 Secret 还原。
+      #   期望 SHA256 指纹恒为 62:E6:2F:47:FE:8F:...:60:09
+      - name: Restore release keystore
+        run: |
+          echo "${{ secrets.RELEASE_KEYSTORE_B64 }}" | base64 -d > "$HOME/dsh-release.keystore"
+          ls -l "$HOME/dsh-release.keystore"
+          echo "--- 正式证书指纹 ---"
+          keytool -list -v -keystore "$HOME/dsh-release.keystore" \
+            -storepass "${{ secrets.RELEASE_STORE_PASSWORD }}" | grep -E 'SHA1:|SHA256:' | head -2
+
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Build release APK
+        env:
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEYSTORE_PATH: ${{ github.workspace }}/../dsh-release.keystore
+        run: |
+          # HOME 下的 keystore 用绝对路径传给 gradle（RELEASE_KEYSTORE_PATH 优先级最高）
+          export RELEASE_KEYSTORE_PATH="$HOME/dsh-release.keystore"
+          gradle assembleRelease --no-daemon --stacktrace
 
       # 构建后当场验签 —— 光看 keystore 指纹不够，要看 APK 里实际的证书
       - name: Verify APK signature
@@ -72,18 +93,29 @@ jobs:
         run: |
           BUILD_TOOLS=$(ls -d /usr/local/lib/android/sdk/build-tools/*/ 2>/dev/null | sort -V | tail -1)
           echo "build-tools: $BUILD_TOOLS"
-          "$BUILD_TOOLS/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
+          echo "=== debug APK ==="
+          "$BUILD_TOOLS/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk 2>&1 | grep -E 'Signer #1 certificate (DN|SHA-256)' || true
+          echo "=== release APK（期望 SHA-256 = 62:e6:2f:47:fe:8f:...:60:09）==="
+          "$BUILD_TOOLS/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk 2>&1 | grep -E 'Signer #1 certificate (DN|SHA-256)' || true
 
       - name: Show APK info
         if: success()
         run: |
-          ls -la app/build/outputs/apk/debug/
-          find app/build/outputs/apk/debug -name '*.apk' -exec ls -lh {} \;
+          ls -la app/build/outputs/apk/debug/ app/build/outputs/apk/release/ 2>/dev/null
+          find app/build/outputs/apk -name '*.apk' -exec ls -lh {} \;
 
-      - name: Upload APK
+      - name: Upload debug APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: dsh-host-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
+
+      - name: Upload release APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-host-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 90
