@@ -86,11 +86,37 @@ object EngineLauncher {
     // ---------- 启动 ----------
 
     /**
+     * 找一个本进程能真正 bind 的本地端口。
+     *
+     * 为什么不直接用 `--port 0` 交给 OS 分配：实测在 App 域（untrusted_app_27）下用
+     * `--port 0` 启动，dsh 从头到尾没有绑任何端口，也没写日志 —— 进程活着但服务从未
+     * 起来。同样参数在 magisk 域下却能走到 bind（报 EACCES 带不出端口号）。
+     * 结论：`--port 0` 这条路在 App 域不可靠，改回「先探测再指定」。
+     *
+     * 探测出来的端口含义是「Java 侧能绑」——Java 能绑，Node 才可能绑。
+     */
+    private fun probePorts(ctx: Context): Pair<Int?, List<String>> {
+        val candidates = listOf(13081, 13082, 13091, 25080, 35080, 45678)
+        val report = mutableListOf<String>()
+        for (p in candidates) {
+            try {
+                java.net.ServerSocket(p, 8, java.net.InetAddress.getByName("127.0.0.1")).use { }
+                report.add("$p OK")
+                return p to report
+            } catch (e: Exception) {
+                report.add("$p FAIL ${e.javaClass.simpleName}")
+            }
+        }
+        return null to report
+    }
+
+    /**
      * 启动引擎。
      *
-     * 端口一律交给 OS 分配（`--port 0`）。原因：固定端口会撞车 —— 3080/3081 被旧壳
-     * 占用，而 Node 绑被占端口报的是 EACCES 而不是 EADDRINUSE，看起来像权限问题
-     * （踩过一次）。dsh 支持 `--port 0`，实际端口从它打印的 URL 里读。
+     * 端口由 probePorts 先探再定。不用 `--port 0`：实测在 App 域下 dsh 会完全不绑端口
+     * 且不写任何日志（进程活着但服务没起来）；固定端口则稳定可用。
+     * 选端口时要避开旧壳占用的 3080/3081 —— 绑被占端口时 Node 报 EACCES 而非
+     * EADDRINUSE，看起来像权限问题（踩过一次）。
      */
     fun start(ctx: Context, scope: CoroutineScope) {
         if (_state.value is EngineState.Running || _state.value is EngineState.Starting) {
@@ -104,12 +130,23 @@ object EngineLauncher {
             return
         }
 
+        // 先探端口：把真实可绑性写进日志，别再让 SELinux/权限问题伪装成端口冲突
+        val (freePort, portReport) = probePorts(ctx)
+        appendLog("端口探测: " + portReport.joinToString(" | "))
+        if (freePort == null) {
+            _state.value = EngineState.Failed(
+                "本进程无法绑定任何 TCP 端口\n" + portReport.joinToString("\n")
+            )
+            return
+        }
+        appendLog("选用端口 $freePort")
+
         _state.value = EngineState.Starting
-        appendLog("=== 启动引擎（端口由系统分配）===")
+        appendLog("=== 启动引擎 (port=$freePort) ===")
 
         readerJob = scope.launch(Dispatchers.IO) {
             try {
-                doStart(ctx)
+                doStart(ctx, freePort)
             } catch (e: Exception) {
                 _state.value = EngineState.Failed("启动异常: ${e.message}")
                 appendLog("启动异常: ${e.message}")
@@ -117,7 +154,7 @@ object EngineLauncher {
         }
     }
 
-    private suspend fun doStart(ctx: Context) = withContext(Dispatchers.IO) {
+    private suspend fun doStart(ctx: Context, port: Int) = withContext(Dispatchers.IO) {
         val payload = payloadDir(ctx)
         val dshHome = dshHomeDir(ctx).apply { mkdirs() }
         val runtime = runtimeDir(ctx).apply { mkdirs() }
@@ -131,7 +168,7 @@ object EngineLauncher {
             "web",
             "--host", "127.0.0.1",
             "--no-open",
-            "--port", "0",
+            "--port", port.toString(),
         )
         appendLog("cmd: ${cmd.joinToString(" ")}")
 
