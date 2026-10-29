@@ -1,0 +1,252 @@
+#!/system/bin/sh
+# dsh-upgrade —— dsh 内核升级闸门（P2）
+#
+# 四件事：能看 / 能升 / 能退 / 能锁
+#
+# 核心安全设计：
+#   ① 永不动原件 —— 新版本先装进 dshroot.new，校验通过才原子切换
+#   ② Android 适配 patch 必须重打 —— node-addon-require-builtin 的 js-fallback 版，
+#      否则新版本必然以 "No usable native binding found" 起不来
+#   ③ 每次切换都保留备份 —— 一条 rollback 命令回到上一版
+#   ④ cp 出来的副本必须修 SELinux context —— cp -a 不保留 MCS category
+#
+# 用法：
+#   dsh-upgrade status              看当前版本 + 官方可用版本
+#   dsh-upgrade upgrade <version>   升级（如 0.2.1-rc.4）
+#   dsh-upgrade rollback            回滚到最近备份
+#   dsh-upgrade list                列出所有备份/新目录
+
+set -u
+
+PKG=cc.bestly.dsh
+BASE=/data/user/0/$PKG/files
+PAYLOAD=$BASE/payload
+RUNTIME=$PAYLOAD/runtime
+DROOT=$PAYLOAD/dshroot
+DROOT_NEW=$PAYLOAD/dshroot.new
+STAGE=/data/local/tmp/dsh-stage
+PATCH=/data/adb/dsh-tools/patches/node-addon-require-builtin.android.js
+UID_APP=$(stat -c %u "$PAYLOAD" 2>/dev/null || echo "")
+GID_APP=$(stat -c %g "$PAYLOAD" 2>/dev/null || echo "")
+CTX=$(stat -c %C "$DROOT" 2>/dev/null || echo "")
+
+NODE=$RUNTIME/bin/node
+NPMPATH=/data/user/0/$PKG/files/payload/npm/bin/npm-cli.js
+
+log() { echo "[$(date +%H:%M:%S)] $*"; }
+die() { echo "[$(date +%H:%M:%S)] ✗ $*" >&2; exit 1; }
+
+dsh_env() {
+  export PATH="$RUNTIME/bin:/system/bin"
+  export LD_LIBRARY_PATH="$RUNTIME/lib"
+  export HOME="$BASE/dshhome"
+  export DSH_HOME="$BASE/dshhome"
+  export TMPDIR=/data/local/tmp
+  export OPENSSL_CONF="$RUNTIME/etc/openssl.cnf"
+  export SSL_CERT_FILE="$RUNTIME/etc/cacert.pem"
+}
+
+cur_version() {
+  grep -m1 '"version"' "$DROOT/lib/node_modules/@deepseek-ai/dsh/package.json" 2>/dev/null | sed 's/.*: *"//; s/".*//'
+}
+
+stop_engine() {
+  log "停止引擎…"
+  PIDS=$(pgrep -f "$PKG/files/payload.*bin.js" 2>/dev/null)
+  [ -n "$PIDS" ] && kill $PIDS 2>/dev/null
+  sleep 3
+  PIDS=$(pgrep -f "$PKG/files/payload.*bin.js" 2>/dev/null)
+  [ -n "$PIDS" ] && { log "强杀残留 $PIDS"; kill -9 $PIDS 2>/dev/null; sleep 1; }
+  # 顺带停 App 的前台服务，避免它把引擎又拉起来
+  am force-stop $PKG 2>/dev/null
+  sleep 1
+  log "引擎已停"
+}
+
+start_engine() {
+  log "启动 App（前台服务会拉起引擎）…"
+  am start -n $PKG/.MainActivity >/dev/null 2>&1
+}
+
+verify_engine() {
+  # 等引擎写出 host/port/token，并做一次 HTTP 确认
+  i=0
+  while [ $i -lt 60 ]; do
+    H=$(cat "$BASE/runtime/host" 2>/dev/null)
+    P=$(cat "$BASE/runtime/port" 2>/dev/null)
+    T=$(cat "$BASE/runtime/token" 2>/dev/null)
+    if [ -n "$H" ] && [ -n "$P" ] && [ -n "$T" ]; then
+      CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$H:$P/" 2>/dev/null)
+      if [ "$CODE" = "401" ] || [ "$CODE" = "303" ]; then
+        log "✓ 引擎就绪 host=$H port=$P http=$CODE"
+        return 0
+      fi
+    fi
+    i=$((i+1)); sleep 2
+  done
+  log "✗ 引擎 120 秒内未就绪"
+  return 1
+}
+
+fix_owner() {
+  [ -n "$UID_APP" ] || { log "!! 取不到 App uid，跳过属主修复"; return 0; }
+  chown -R "$UID_APP:$GID_APP" "$1"
+  chmod -R u+rwX "$1"
+  [ -n "$CTX" ] && chcon -R "$CTX" "$1"
+}
+
+reapply_patch() {
+  # 布局有两种，必须都支持：
+  #   扁平（npm install 产物）：<root>/lib/node_modules/node-addon-require-builtin
+  #   嵌套（社区壳原装）      ：<root>/lib/node_modules/@deepseek-ai/dsh/node_modules/node-addon-require-builtin
+  local root="$1"
+  local hit=""
+  for cand in \
+    "$root/lib/node_modules/node-addon-require-builtin/lib/index.js" \
+    "$root/lib/node_modules/@deepseek-ai/dsh/node_modules/node-addon-require-builtin/lib/index.js" ; do
+    if [ -f "$cand" ]; then hit="$cand"; break; fi
+  done
+  if [ -z "$hit" ]; then
+    # 再兜一层：全盘找（最慢但最保险）
+    hit=$(find "$root/lib/node_modules" -maxdepth 5 -path "*node-addon-require-builtin/lib/index.js" 2>/dev/null | head -1)
+  fi
+  [ -n "$hit" ] || die "patch 目标不存在（扁平/嵌套都没找到 node-addon-require-builtin）"
+  [ -f "$PATCH" ] || die "找不到 Android 适配 patch: $PATCH"
+  cp -f "$PATCH" "$hit" || die "patch 写入失败"
+  log "✓ Android 适配 patch 已重打 → ${hit#$root/}"
+}
+
+cmd_status() {
+  log "当前版本: $(cur_version)"
+  log "官方 dist-tags:"
+  dsh_env
+  ( cd "$PAYLOAD" && node "$NPMPATH" view @deepseek-ai/dsh dist-tags --json 2>&1 | sed 's/^/    /' )
+  echo ""
+  cmd_list
+}
+
+cmd_list() {
+  log "payload 目录："
+  ls -d "$PAYLOAD"/dshroot* 2>/dev/null | while read -r d; do
+    v=$(grep -m1 '"version"' "$d/lib/node_modules/@deepseek-ai/dsh/package.json" 2>/dev/null | sed 's/.*: *"//; s/".*//')
+    sz=$(du -sh "$d" 2>/dev/null | cut -f1)
+    echo "    $(basename "$d")  版本=${v:-?}  大小=${sz:-?}"
+  done
+}
+
+cmd_upgrade() {
+  local VER="${1:-}"
+  [ -n "$VER" ] || die "用法: dsh-upgrade upgrade <version>"
+  local CUR; CUR=$(cur_version)
+  log "当前 $CUR → 目标 $VER"
+
+  # 1) 预检
+  [ -x "$NODE" ] || die "node 不存在: $NODE"
+  [ -f "$NPMPATH" ] || die "npm 不存在: $NPMPATH"
+  [ -f "$PATCH" ] || die "Android patch 缺失: $PATCH"
+
+  # 2) 停引擎
+  stop_engine
+
+  # 3) 备份当前
+  local BAK=$PAYLOAD/dshroot.bak-$CUR
+  if [ -d "$BAK" ]; then
+    log "备份已存在，复用: $BAK"
+  else
+    log "备份当前版本 → $(basename "$BAK")"
+    cp -a "$DROOT" "$BAK" || die "备份失败"
+    fix_owner "$BAK"
+  fi
+
+  # 4) 在暂存区 npm install（不碰 payload）
+  log "在暂存区安装 @deepseek-ai/dsh@$VER（约 2 分钟，--ignore-scripts 跳过原生编译）"
+  rm -rf "$STAGE"; mkdir -p "$STAGE/npmcache"
+  echo '{"name":"dsh-stage","version":"1.0.0","private":true}' > "$STAGE/package.json"
+  dsh_env
+  ( cd "$STAGE" && \
+    npm_config_cache="$STAGE/npmcache" \
+    node "$NPMPATH" install "@deepseek-ai/dsh@$VER" --ignore-scripts --no-audit --no-fund 2>&1 | tail -5 ) \
+    || die "npm install 失败"
+  local GOT
+  GOT=$(grep -m1 '"version"' "$STAGE/node_modules/@deepseek-ai/dsh/package.json" 2>/dev/null | sed 's/.*: *"//; s/".*//')
+  [ "$GOT" = "$VER" ] || die "装出来的版本是 $GOT，不是 $VER"
+
+  # 5) 组装 dshroot.new（拷贝当前结构 → 换掉依赖 → 放回 tool 包）
+  log "组装 dshroot.new"
+  rm -rf "$DROOT_NEW"
+  cp -a "$DROOT" "$DROOT_NEW" || die "复制失败"
+  local NM=$DROOT_NEW/lib/node_modules
+  rm -rf "$NM"/*
+  cp -a "$STAGE/node_modules"/* "$NM"/ || die "铺依赖失败"
+  # 放回社区壳特有的 4 个 tool 包（npm 上没有）
+  for t in dsh-tool-accessibility dsh-tool-android dsh-tool-shizuku dsh-tool-vscreen; do
+    [ -d "$DROOT/lib/node_modules/@deepseek-ai/$t" ] && cp -a "$DROOT/lib/node_modules/@deepseek-ai/$t" "$NM/@deepseek-ai/" 2>/dev/null
+  done
+  # 关键：重打 Android 适配 patch
+  reapply_patch "$DROOT_NEW"
+  fix_owner "$DROOT_NEW"
+
+  # 6) 校验：新目录能跑起来吗
+  log "校验新版本能否启动 CLI…"
+  dsh_env
+  local OUT
+  OUT=$( cd "$NM/@deepseek-ai/dsh" && timeout 90 node --expose-internals lib/bin.js web --help 2>&1 | head -3 )
+  echo "$OUT" | grep -q "Usage: dsh" || { log "✗ 校验失败，新版本起不来："; echo "$OUT" | sed 's/^/    /'; log "原件未动，清理 dshroot.new"; rm -rf "$DROOT_NEW"; return 1; }
+  log "✓ CLI 校验通过"
+
+  # 7) 原子切换
+  local BROKEN=$PAYLOAD/dshroot.old-$CUR-$(date +%H%M%S)
+  log "切换：dshroot → $(basename "$BROKEN")，dshroot.new → dshroot"
+  mv "$DROOT" "$BROKEN" || die "切换第一步失败"
+  mv "$DROOT_NEW" "$DROOT" || { log "✗ 切换第二步失败，回滚"; mv "$BROKEN" "$DROOT"; return 1; }
+  fix_owner "$DROOT"
+
+  # 8) 起引擎验证
+  start_engine
+  if verify_engine; then
+    rm -rf "$BROKEN"    # 切换成功，中间态删除；回滚弹药是 dshroot.bak-$CUR
+    log "✓✓ 升级成功：$CUR → $VER"
+    log "回滚命令: dsh-upgrade rollback"
+    return 0
+  fi
+
+  # 9) 失败自动回滚
+  log "✗ 引擎未就绪，自动回滚到 $CUR"
+  stop_engine
+  rm -rf "$PAYLOAD/dshroot.failed-$(date +%H%M%S)"
+  mv "$DROOT" "$PAYLOAD/dshroot.failed-$(date +%H%M%S)"
+  mv "$BROKEN" "$DROOT"
+  fix_owner "$DROOT"
+  start_engine
+  verify_engine || log "!! 回滚后引擎仍未就绪，需要人工介入"
+  return 1
+}
+
+cmd_rollback() {
+  # 找最近的备份
+  local BAK
+  BAK=$(ls -d "$PAYLOAD"/dshroot.bak-* 2>/dev/null | tail -1)
+  [ -n "$BAK" ] || die "没有可回滚的备份"
+  local BV; BV=$(grep -m1 '"version"' "$BAK/lib/node_modules/@deepseek-ai/dsh/package.json" 2>/dev/null | sed 's/.*: *"//; s/".*//')
+  local CUR; CUR=$(cur_version)
+  log "回滚：$CUR → $BV（备份 $BAK）"
+
+  stop_engine
+  local ASIDE=$PAYLOAD/dshroot.rolledback-$CUR-$(date +%H%M%S)
+  mv "$DROOT" "$ASIDE" || die "移走当前版本失败"
+  mv "$BAK" "$DROOT" || { log "✗ 恢复失败，把当前版本放回"; mv "$ASIDE" "$DROOT"; return 1; }
+  fix_owner "$DROOT"
+  log "当前版本已恢复为 $(cur_version)，旧版本留在 $(basename "$ASIDE")"
+
+  start_engine
+  verify_engine || log "!! 回滚后引擎未就绪，需要人工介入"
+  log "✓ 回滚完成"
+}
+
+case "${1:-status}" in
+  status)   cmd_status ;;
+  list)     cmd_list ;;
+  upgrade)  shift; cmd_upgrade "${1:-}" ;;
+  rollback) cmd_rollback ;;
+  *) echo "用法: dsh-upgrade {status|list|upgrade <version>|rollback}"; exit 1 ;;
+esac
