@@ -58,7 +58,10 @@ jobs:
         run: |
           mkdir -p "$HOME/.android"
           echo "${{ secrets.DEBUG_KEYSTORE_B64 }}" | base64 -d > "$HOME/.android/debug.keystore"
-          keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android 2>/dev/null | grep -E 'SHA1|SHA256' | head -2
+          echo "--- keystore 大小（空文件说明 secret 没取到）---"
+          ls -l "$HOME/.android/debug.keystore"
+          echo "--- 证书指纹（应恒为 FC:FF:8F:90...）---"
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android | grep -E 'SHA1:|SHA256:' | head -2
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
