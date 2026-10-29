@@ -16,8 +16,16 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+      usesCleartextTraffic 是必须的。
+      targetSdk >= 28 默认禁止明文 HTTP，而引擎只在 127.0.0.1 上用 http 提供服务
+      （dsh web 不带 TLS）。不加这条，WebView 会直接白屏并报
+      net::ERR_CLEARTEXT_NOT_PERMITTED。
+      范围限于本机回环，不放宽任何对外连接。
+    -->
     <application
         android:allowBackup="false"
+        android:usesCleartextTraffic="true"
         android:label="dsh host"
         android:supportsRtl="true"
         android:theme="@style/Theme.DshHost">

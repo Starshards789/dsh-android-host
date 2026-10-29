@@ -39,6 +39,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cc.bestly.dsh.engine.EngineLauncher
 import cc.bestly.dsh.engine.EngineState
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.viewinterop.AndroidView
 
 /**
  * P1.1 —— 宿主骨架
@@ -68,6 +75,19 @@ fun EngineScreen(activity: ComponentActivity) {
     val log by EngineLauncher.log.collectAsState()
     val missing = remember { EngineLauncher.preflight(activity) }
     val running = state is EngineState.Running || state is EngineState.Starting
+    var showWeb by remember { mutableStateOf(false) }
+    val runningState = state as? EngineState.Running
+
+    // 对话模式：全屏 WebView 直接加载引擎的 Web UI。
+    // token 走 URL 参数 —— 这是 dsh 唯一的认证方式（没有 header 认证）。
+    if (showWeb && runningState != null) {
+        EngineWebView(
+            port = runningState.port,
+            token = runningState.token,
+            onBack = { showWeb = false }
+        )
+        return
+    }
 
     // 打开 App 就自动拉起引擎 —— 这才是宿主该干的事。
     // P1.1 一开始做成手动点按钮，但 targetSdk 27 的兼容模式下 adb input tap
@@ -157,6 +177,14 @@ fun EngineScreen(activity: ComponentActivity) {
             ) {
                 Text("停止")
             }
+            // 引擎就绪后才能进对话 —— 没端口和 token 时 WebView 无从加载
+            Button(
+                onClick = { showWeb = true },
+                enabled = runningState != null,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("对话")
+            }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -229,6 +257,52 @@ private fun stateColor(s: EngineState): Color = when (s) {
     is EngineState.Starting -> Color(0xFFF9A825)
     is EngineState.Running -> Color(0xFF2E7D32)
     is EngineState.Failed -> Color(0xFFC62828)
+}
+
+/**
+ * 内置 WebView 对话页。
+ *
+ * 直接加载引擎自己的 Web 界面 —— 不重写 UI。这是「官方内核零改动」原则的延伸：
+ * 界面归 dsh 管，我们只负责把它装进自己的壳里，跟着官方升级自动变。
+ *
+ * token 只能走 URL 参数：dsh 的认证就是这一个通道，没有 header 认证。
+ * 所以不要把 token 打到日志里，也不要在界面上显示完整 token。
+ */
+@Composable
+private fun EngineWebView(port: Int, token: String, onBack: () -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("dsh 对话", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(8.dp))
+            Text(":$port", fontSize = 11.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+            Spacer(Modifier.weight(1f))
+            OutlinedButton(onClick = onBack) {
+                Text("返回", fontSize = 12.sp)
+            }
+        }
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true      // dsh web 依赖 localStorage
+                        databaseEnabled = true
+                        cacheMode = WebSettings.LOAD_DEFAULT
+                        useWideViewPort = true
+                        loadWithOverviewMode = true
+                    }
+                    webViewClient = WebViewClient()
+                    loadUrl("http://127.0.0.1:$port/?token=$token")
+                }
+            }
+        )
+    }
 }
 
 /**
