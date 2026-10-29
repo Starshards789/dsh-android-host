@@ -20,7 +20,24 @@ android {
         versionName = "0.2.0"
     }
 
+    // ★ 显式固定 debug 签名。
+    // 不显式配置时，AGP 只在 keystore 缺失时自动生成到 ~/.android/debug.keystore；
+    // 实测 CI 上即使把 keystore 放好，产出的 APK 证书仍然每次不同 —— 那说明
+    // AGP 没用它。显式指向同一路径才能真正固定，否则每次构建签名不同，
+    // 覆盖升级报 INSTALL_FAILED_UPDATE_INCOMPATIBLE，只能卸载重装（会清 payload）。
+    signingConfigs {
+        create("fixedDebug") {
+            storeFile = File(System.getProperty("user.home"), ".android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("fixedDebug")
+        }
         release {
             isMinifyEnabled = false
         }
