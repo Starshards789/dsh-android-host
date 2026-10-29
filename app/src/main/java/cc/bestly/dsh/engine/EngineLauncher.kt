@@ -12,6 +12,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.net.InetAddress
+import java.net.ServerSocket
 
 /**
  * P1.1 —— 引擎启动器
@@ -84,6 +86,32 @@ object EngineLauncher {
     // ---------- 启动 ----------
 
     /**
+     * 找一个本进程能真正 bind 的本地端口。
+     *
+     * 为什么需要这个：实测 3081 被旧壳占用（Node 报 EACCES 而非 EADDRINUSE，
+     * 极易误判），换成 13081 后仍然 EACCES —— 而 ss 显示 13081 根本没人占用。
+     * 说明限制来自进程自身的 SELinux 域（untrusted_app_27），不是端口冲突。
+     * 旧壳能绑 3080 是因为它的域带 c28,c257 这些 category，我们的没有。
+     *
+     * 所以启动前用 Java 侧 ServerSocket 亲自试一遍：Java 能绑的，Node 才可能绑。
+     * 全都不行就把实际错误暴露到日志里，不要让它伪装成"引擎起不来"。
+     */
+    private fun probePorts(ctx: Context): Pair<Int?, List<String>> {
+        val candidates = listOf(13081, 13082, 13091, 25080, 35080, 45678, 3080)
+        val report = mutableListOf<String>()
+        for (p in candidates) {
+            try {
+                ServerSocket(p, 8, InetAddress.getByName("127.0.0.1")).use { }
+                report.add("$p OK")
+                return p to report
+            } catch (e: Exception) {
+                report.add("$p FAIL ${e.javaClass.simpleName}: ${e.message}")
+            }
+        }
+        return null to report
+    }
+
+    /**
      * 启动引擎。
      *
      * 端口默认 13081 —— 不能复用 3080/3081：旧壳 com.deepseek.harness 的引擎
@@ -96,6 +124,20 @@ object EngineLauncher {
             return
         }
 
+        // 先探端口：把真实的可绑性写进日志，避免再把 SELinux 拒绝误读成端口冲突
+        val (freePort, portReport) = probePorts(ctx)
+        appendLog("端口探测: " + portReport.joinToString(" | "))
+        if (freePort == null) {
+            appendLog("!! 没有任何候选端口可绑 —— 这是进程 SELinux 域的限制，不是端口冲突")
+            _state.value = EngineState.Failed(
+                "本进程无法绑定任何 TCP 端口（SELinux 域限制）",
+                portReport.joinToString("\n")
+            )
+            return
+        }
+        appendLog("选用端口 $freePort")
+        val usePort = freePort
+
         val missing = preflight(ctx)
         if (missing.isNotEmpty()) {
             _state.value = EngineState.Failed("环境不全: " + missing.joinToString("; "))
@@ -103,11 +145,11 @@ object EngineLauncher {
         }
 
         _state.value = EngineState.Starting
-        appendLog("=== 启动引擎 (port=$port) ===")
+        appendLog("=== 启动引擎 (port=$usePort) ===")
 
         readerJob = scope.launch(Dispatchers.IO) {
             try {
-                doStart(ctx, port)
+                doStart(ctx, usePort)
             } catch (e: Exception) {
                 Log.e(TAG, "start failed", e)
                 _state.value = EngineState.Failed(e.message ?: e.toString())
