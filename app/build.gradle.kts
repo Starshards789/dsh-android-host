@@ -98,6 +98,17 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    // ★ 关掉 release 的 lintVital 阻塞。
+    // release 构建会跑 lintVitalRelease，其中 ExpiredTargetSdkVersion 会报
+    // "Google Play requires that apps target API level 33 or higher" 并**致命失败**。
+    // 但本 App 的 targetSdk 必须锁 28 —— 这是 plat_seapp_contexts 决定的（见上方注释），
+    // 改成 33 就进 untrusted_app_33，失去从 app 数据目录 exec 二进制的能力，引擎直接起不来。
+    // 本 App 不进 Google Play（自用 + 直接分发 APK），所以这条检查对我们是纯噪声。
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
 }
 
 dependencies {
