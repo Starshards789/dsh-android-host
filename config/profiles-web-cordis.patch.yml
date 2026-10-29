@@ -23,11 +23,16 @@
   config:
     credentialOnboarding: false
 
-# ★ 默认模型。缺这一条，前端启动时找不到可用模型。
+# ★ 默认模型：走「DeepSeek 账号登录」（deepseek-account），不是 API key。
+#   dsh-base 里 deepseek-account 指的是 dsh-deepseek-account-platform
+#   （浏览器 PKCE 授权，https://platform.deepseek.com/oauth/callback），
+#   前端把它排在 provider 列表第一位。
+#   如果哪天想切回 API key，把 provider 改成 deepseek-official 即可
+#   （credentials 里已有 DEEPSEEK_API_KEY，两套可并存）。
 - id: agent-default-model
   name: "@deepseek-ai/dsh-agent-default-model"
   config:
-    provider: deepseek-official
+    provider: deepseek-account
     model: deepseek-flash
     reasoningEffort: max
 
