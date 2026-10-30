@@ -192,21 +192,31 @@ minTargetSdkVersion=26 → domain=untrusted_app_27   levelFrom=user
 | **P4** | **插件体系：两层插件 + 6 个官方插件注册** | **✅ 完成** |
 | **P5** | **正式签名 + 密钥进 Vaultwarden** | **✅ 完成（证书 `62:e6:2f:47:…:42:ce:60:09`）** |
 | **P6** | **自有插件 `dsh-tool-phone-life`（4 工具）+ `phone-health`（1 工具）** | **✅ 完成（真机验证）** |
-| **P7** | **引擎自愈重写（v0.8.1→v0.8.4）** | **✅ 完成（2026-10-30 真机验收）** |
-| P7 | 记忆系统（设计已定，见 `docs/memory-design.md`） | 📝 设计完成，待施工 |
-| P8 | 主动性（定时 / 目标 / 技能） | 待办 |
+| **P7** | **引擎自愈重写（v0.8.1→v0.8.4）+ 三层看护** | **✅ 完成（2026-10-30 真机验收）** |
+| **P7.5** | **记忆系统第 0、1 步（引擎自愈 + 收尾三问触发器）** | **✅ 完成（2026-10-30，见 `docs/memory-trigger.md`）** |
+| **P8** | **零八从旧壳迁到新壳 + 旧壳退役** | **✅ 完成（2026-10-30 21:20 验收，见 `docs/migration-cutover.md`）** |
+| P9 | 记忆系统第 2–4 步（L0 一页纸 / 三个原生工具 / 后台巩固） | 📝 设计完成，第 3 步等一周观测后决定 |
+| P10 | 主动性（定时 / 目标 / 技能） | 待办 |
 
-### 当前实机状态（2026-10-30）
+### 当前实机状态（2026-10-30 21:20 实测）
 
 ```
-App        cc.bestly.dsh  v0.8.0  versionCode 8  uid 10295  MCS category c39
+App        cc.bestly.dsh  v0.8.5  versionCode 13  uid 10295  MCS category c39
 内核       rc.2（运行中），node v26.4.0
+引擎       13081（绑 Tailscale 接口，非回环）  401 = 健康
 工具数     46（官方 41 + 自有 5）
+权限       READ/WRITE_EXTERNAL_STORAGE 均 granted（v0.8.5 补）
 签名       正式签名，apksigner verify 通过
 登录       DeepSeek 账号 OAuth（非 APIKey）
-GitHub     run 40879862738 success
-已知阻塞   引擎被 ColorOS 冻结后僵死（详见 docs/engine-freeze.md）
+看护       App watcher（92s 自愈）/ host-guard-v2（root 60s）/ CT106 cronjob（5min）
+中继       tg8-relay → 13081（TG 群「456总控室」正常收发）
+旧壳       com.deepseek.harness 已 pm disable-user，数据 39MB 保留（退路）
+记忆       zero-eight 月记 53 行 / 12,025 字节（基线）
+冻结       已解决（ColorOS 三开关按 App 生效，新壳已开）
 ```
+
+**唯一遗留**：内置 WebView 需 Chrome 119+（系统 WebView 停在 117），
+App 内 UI 不可用；日常走 Tailscale 浏览器或 TG 群，引擎本身不受影响。
 
 ## 更新纪律（456 定的规矩，2026-10-30）
 
@@ -239,14 +249,68 @@ GitHub     run 40879862738 success
 ## 目录
 
 ```
-docs/design-v2.md                完整设计文档（架构、阶段拆解、实测数据、踩坑记录）
-docs/trust.md                    信任根说明（签名/验签/补签流程、已知边界）
-docs/patches/                    Android 适配补丁（升级时必须重打）
-tools/dsh-upgrade                升级闸门（能看/能升/能退/能锁）
-tools/dsh-trust.js               信任根工具（keygen/sign/verify）
-tools/host-guard                 root 冻结守护脚本（Magisk service.d 拉起）
-app/                  Android 宿主源码
+app/                    宿主 App（Kotlin + Compose）
+  src/main/java/cc/bestly/dsh/
+    MainActivity.kt     界面 + 存储权限申请
+    EngineService.kt    前台服务、心跳、健康检查、外部重启入口
+    engine/EngineLauncher.kt   引擎 fork、端口探测、generation 代号
+    BootReceiver.kt     开机自启
+config/                 dsh 配置补丁（cordis.patch.yml）
+plugins/                自有插件（phone-life / phone-health）
+tools/                  运维脚本（升级闸门 / 看护 / 巡检 / 验收）
+docs/                   设计与实测记录（见下方索引）
+.github/workflows/      云端构建
 ```
+
+## 文档索引
+
+**排障与实测（踩过的坑都在这里）**
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/engine-freeze.md`](docs/engine-freeze.md) | ColorOS 冻结机制与 33 次冻结的原始记录 |
+| [`docs/engine-selfheal.md`](docs/engine-selfheal.md) | v0.8.1→v0.8.4 四个 bug 与 generation 代号修法 |
+| [`docs/external-watchdog.md`](docs/external-watchdog.md) | 三层看护设计 + host-guard-v2 的六个坑 |
+| [`docs/trust.md`](docs/trust.md) | 升级闸门的信任根（Ed25519） |
+
+**记忆系统**
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/memory-design.md`](docs/memory-design.md) | v1 方案：四层 + 三钩子 + 5 步落地 |
+| [`docs/memory-trigger.md`](docs/memory-trigger.md) | 第 1 步「任务收尾三问」+ 零八的回应 |
+
+**换壳迁移（2026-10-30）**
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/migration-prep.md`](docs/migration-prep.md) | 第 ① 步准备：搬什么、不搬什么、三项能力实测 |
+| [`docs/cross-shell-gate.md`](docs/cross-shell-gate.md) | 换壳门（防两个零八）+ 换壳说明 |
+| [`docs/migration-cutover.md`](docs/migration-cutover.md) | 第 ③ 步切换：漏了认证那一环 + FUSE 属主判据失效 |
+| [`docs/migration-rollback.md`](docs/migration-rollback.md) | **回退手册**（3 步 + 10 项前置检查 + 24h 观察项） |
+| [`docs/oldshell-retire.md`](docs/oldshell-retire.md) | 旧壳退役：mailwatch 不能停 + 被拉起两次的两个原因 |
+
+**其他**
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/design-v2.md`](docs/design-v2.md) | 早期架构设计（755 行，含已被推翻的方案，保留原文） |
+| [`docs/correspondence/`](docs/correspondence/) | 与零八的往来信件原文 |
+
+**脚本**
+
+| 脚本 | 用途 |
+|---|---|
+| `tools/dsh-upgrade` | 升级闸门：能看 / 能升 / 能退 / 能锁 |
+| `tools/dsh-trust.js` | 信任根签名与校验 |
+| `tools/host-guard-v2` | 新壳外部看护（冻结→解冻→restart→冷启动，分级处置） |
+| `tools/service.d/60-host-guard-v2.sh` | 上面那个的开机自启（Magisk late_start） |
+| `tools/service.d/35-mailwatch.sh` | 零八收件箱值守 v5（动态读 runtime/） |
+| `tools/dsh-watchdog-alert.sh` | CT106 侧巡检（正常静默，只报异常） |
+| `tools/tgsend-gate.sh` + `tools/install-gate.sh` | 换壳门（awk 原地插入，不重写凭据文件） |
+| `tools/dsh-migration-acceptance.sh` | 11-06 一周后验收（记忆增长 + 新壳健康 + 旧壳现状） |
+| `tools/host-guard` | 旧壳冻结守护（已随旧壳退役，保留供回退参考） |
+| `docs/patches/` | Android 适配补丁（升级时必须重打） |
 
 ## 许可
 
