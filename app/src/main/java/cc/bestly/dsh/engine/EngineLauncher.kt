@@ -336,15 +336,27 @@ object EngineLauncher {
                 -1
             }
             appendLog("引擎进程退出，code=$exit")
-            if (_state.value is EngineState.Running || _state.value is EngineState.Starting) {
-                _state.value = EngineState.Failed("进程退出 code=$exit（见下方日志）")
-            }
-            process = null
-            try {
-                File(runtime, "port").delete()
-                File(runtime, "host").delete()
-                File(runtime, "token").delete()
-            } catch (_: Exception) {
+            // ★ 2026-10-30 修竞态：只有「退出的仍然是当前登记的进程」才做善后。
+            //
+            //   restart() 会先把 process 置空、再起新的，而旧引擎的 finally 会晚一步跑到这里。
+            //   不加这个判断的话：
+            //     ① 会把「正在启动的新引擎」误判成 Failed（状态被旧进程的死亡覆盖）
+            //     ② 还会把 process 置空，让新引擎从此无人接管（健康检查也看不到了）
+            //   实测证据：19:03:31 外部重启后立刻变成「启动失败」，
+            //   白等了 15 秒退避才重新拉起 —— 就是这条。
+            if (process === proc) {
+                if (_state.value is EngineState.Running || _state.value is EngineState.Starting) {
+                    _state.value = EngineState.Failed("进程退出 code=$exit（见下方日志）")
+                }
+                process = null
+                try {
+                    File(runtime, "port").delete()
+                    File(runtime, "host").delete()
+                    File(runtime, "token").delete()
+                } catch (_: Exception) {
+                }
+            } else {
+                appendLog("（这是旧引擎的退出，当前已有新实例，忽略）")
             }
         }
     }
