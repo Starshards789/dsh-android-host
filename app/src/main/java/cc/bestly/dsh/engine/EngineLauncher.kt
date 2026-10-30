@@ -50,6 +50,10 @@ object EngineLauncher {
     private var process: Process? = null
     private var readerJob: Job? = null
 
+    /** 最近一次 start 用的 Context，只用于「把日志落到文件」 */
+    @Volatile
+    private var lastCtx: Context? = null
+
     private val _state = MutableStateFlow<EngineState>(EngineState.Idle)
     val state: StateFlow<EngineState> = _state.asStateFlow()
 
@@ -167,6 +171,7 @@ object EngineLauncher {
      * EADDRINUSE，看起来像权限问题（踩过一次）。
      */
     fun start(ctx: Context, scope: CoroutineScope) {
+        lastCtx = ctx
         if (_state.value is EngineState.Running || _state.value is EngineState.Starting) {
             Log.w(TAG, "already starting/running, ignore")
             return
@@ -366,8 +371,81 @@ object EngineLauncher {
 
     // ---------- 辅助 ----------
 
+    /**
+     * 记录一行日志。
+     *
+     * ★ 2026-10-30 修：原来只写内存 LiveData（`_log.value`），从 adb shell 侧
+     * 完全看不到 App 内部发生了什么 —— 今天因此把「watcher 到底有没有动作」
+     * 判断错了一次，白绕一圈。现在同时追加到 `runtime/engine-host.log`。
+     */
     private fun appendLog(line: String) {
         _log.value = (_log.value + line).takeLast(400)
+        val ctx = lastCtx ?: return
+        try {
+            val f = File(runtimeDir(ctx), "engine-host.log")
+            val ts = java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US)
+                .format(java.util.Date())
+            f.appendText("$ts  $line\n")
+            if (f.length() > 256 * 1024) {
+                f.writeText(f.readLines().takeLast(1000).joinToString("\n") + "\n")
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * 强制重启：先杀掉当前引擎（不管它是死在半路还是卡住），重置状态再启动。
+     *
+     * ★ 2026-10-30 新增。为什么要它：
+     *   `onStartCommand` 里「状态是 Failed 就不动」的旧逻辑，加上 watcher 只重试一次，
+     *   会让 App 卡死在 Failed —— 进程活、服务活、端口 000、没有任何东西能救。
+     *   这个方法给外部（EngineService 的文件轮询、UI 按钮）一个确定可用的重置入口。
+     */
+    fun restart(ctx: Context, scope: CoroutineScope) {
+        appendLog("=== 强制重启（外部请求）===")
+        val p = process
+        process = null
+        try {
+            p?.destroy()
+            if (p?.waitFor(2, java.util.concurrent.TimeUnit.SECONDS) == false) {
+                p.destroyForcibly()
+                appendLog("旧引擎 2 秒未退出，已强杀")
+            }
+        } catch (e: Exception) {
+            appendLog("杀旧引擎异常: ${e.message}")
+        }
+        readerJob?.cancel()
+        readerJob = null
+        // 关键：把状态复位成 Idle，否则 start() 的守卫会挡住
+        _state.value = EngineState.Idle
+        start(ctx, scope)
+    }
+
+    /**
+     * 健康检查：状态是 Running 时，真的去探一下端口能不能应答。
+     *
+     * ★ 2026-10-30 新增。为什么需要它：
+     *   `_state == Running` 只说明「当初起来过」，不说明「现在还活着」。
+     *   进程被杀、被冻结太久导致事件循环停摆、端口被占 —— 这几种情况下
+     *   状态还是 Running，但服务已经没了。零八在旧壳审出过同一个 bug：
+     *   `ps | grep` 永远命中自己 → 永远判「在跑」。
+     *
+     * 返回 null 表示健康（或当前不是 Running，无需检查）；
+     * 返回字符串表示不健康的原因。
+     */
+    fun healthProblem(): String? {
+        val st = _state.value
+        if (st !is EngineState.Running) return null
+        // 进程层：Process 对象还在吗
+        if (process?.isAlive != true) {
+            return "进程已不在（状态仍为 Running）"
+        }
+        // 服务层：端口真的应答吗
+        val code = httpProbe(st.host, st.port)
+        if (code < 0) {
+            return "端口 ${st.port} 无应答（进程在但服务僵死）"
+        }
+        return null
     }
 
     /**
