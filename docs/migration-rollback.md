@@ -28,6 +28,26 @@ cp config.json config.json.bak-$(date +%Y%m%d-%H%M%S)     # 先备份当前（�
 # 把 config.json 里的引擎地址/端口改回旧壳：127.0.0.1:3080  ← 从备份文件恢复也行
 ```
 
+### ★ 第 1.5 步：把 cookie 也换回旧壳的（切换时踩出来的坑，缺这步照样 401）
+
+```bash
+# 中继用 cookie jar 认证，jar 里装的是「当前壳的 token」
+# 只改地址不换 cookie → 旧壳收到新壳的 token → unauthorized
+ls /root/.hermes/state/8t-cookie.jar.bak-oldshell-*      # 切换时自动备份的那份
+cp /root/.hermes/state/8t-cookie.jar.bak-oldshell-*  /root/.hermes/state/8t-cookie.jar
+chmod 600 /root/.hermes/state/8t-cookie.jar
+```
+
+**验证 cookie 归属**（能报错的验法）：
+
+```bash
+adb -s 100.93.28.42:5555 shell "su -c 'curl -s -b /dev/stdin -X POST http://127.0.0.1:3080/api/session/list \
+  -H \"Content-Type: application/json\" \
+  -d \"{\\\"type\\\":\\\"client-request\\\",\\\"rpcId\\\":\\\"x\\\",\\\"method\\\":\\\"session/list\\\",\\\"payload\\\":{\\\"args\\\":{\\\"_request\\\":{}}}}\"'" \
+  < /root/.hermes/state/8t-cookie.jar
+# 期望 ok:true；若返回 unauthorized 说明 cookie 还是新壳的
+```
+
 ### 第 2 步：重启中继
 
 ```bash
