@@ -392,7 +392,8 @@ object EngineLauncher {
 
     fun stop() {
         val p = process ?: return
-        appendLog("=== 停止引擎 ===")
+        generation++
+        appendLog("=== 停止引擎（gen=$generation）===")
         try {
             p.destroy()                       // SIGTERM 先礼
             val exited = p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
@@ -441,7 +442,13 @@ object EngineLauncher {
      *   这个方法给外部（EngineService 的文件轮询、UI 按钮）一个确定可用的重置入口。
      */
     fun restart(ctx: Context, scope: CoroutineScope) {
-        appendLog("=== 强制重启（外部请求）===")
+        // ★ 关键：先递增代号，把「所有在飞的旧启动」一次性作废。
+        //   如果等到 start() 里才 ++，旧协程会在 cancel 之后、递增之前抢先跑 catch，
+        //   那时它看到的 generation 还是自己那个号，就会把自己判成失败并把状态覆盖掉。
+        //   实测证据（v0.8.3）：19:13:27 强制重启 → 19:13:30 仍报
+        //   「启动失败 · 启动异常: read interrupted」，就是这个时序。
+        generation++
+        appendLog("=== 强制重启（外部请求，gen=$generation）===")
         val p = process
         process = null
         try {
