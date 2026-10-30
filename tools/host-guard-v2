@@ -1,0 +1,251 @@
+#!/system/bin/sh
+# ============================================================================
+# host-guard v2 —— 新壳（cc.bestly.dsh）引擎的外部看护
+#
+# 为什么要有它：
+#   引擎是 App 的子进程。App 被 ColorOS 冻住时，引擎跟着冻，而 App 自己
+#   什么都做不了（它正在被挂起）。所以「救引擎」这件事必须有外部力量参与。
+#
+# 和 v1 的根本区别（v1 已废弃，别再改回去）：
+#   v1: 发现不通 → 解冻 + am start（拉前台）→ 必然亮屏、必然打断 456
+#   v2: 分级处置，能不动界面就不动界面
+#
+# 分级处置顺序（代价从低到高）：
+#   ① 冻结 → 只写 cgroup.freeze=0（纯内核操作，零感知）
+#   ② 解冻后端口仍不通 → 写 runtime/restart 文件，让 App 内部重启引擎
+#      （v0.8.4 新增的入口，全程不亮屏）
+#   ③ 心跳超时 → App 的看护进程已死，写文件也没人读 → 冷启动 App
+#   ④ restart 后仍不通 → 冷启动 App（最后手段，会亮屏）
+#
+# 依赖前提（都有实测依据）：
+#   · engines 只能由 App 自己 fork（root 起的进程 SELinux 域不对，绑不上端口）
+#   · 解冻 != 复活：冻太久之后事件循环已停摆，必须重启进程
+#   · 心跳文件 runtime/heartbeat 每 30s 由 App 更新；超过 180s 没更新 = 看护已死
+#   · 端口是漂移的，必须读 runtime/port，不能硬编码
+#
+# 用法：
+#   host-guard-v2            # 常规运行，间隔 60s
+#   host-guard-v2 30         # 间隔 30s
+#   host-guard-v2 once       # 只跑一轮（调试用）
+# ============================================================================
+
+PKG=cc.bestly.dsh
+UIDN=10295
+RT=/data/user/0/$PKG/files/runtime
+CF=/sys/fs/cgroup/uid_$UIDN/cgroup.freeze
+LOG=/data/adb/host-guard-v2.log
+LOCK=/data/adb/.host-guard-v2.lock
+
+# 心跳超过这个秒数就判定「App 看护已死」
+HB_DEAD=180
+# 引擎重启后等多久算失败。
+# 2026-10-30 实测：引擎冷启动要 40-60 秒（含 node 引导 + dsh 插件加载）。
+# 原来设 50 秒，出现过「第 50 秒判失败、第 53 秒引擎就好了」的误判。
+RESTART_WAIT=80
+# 冷启动后等多久
+COLD_WAIT=35
+
+case "${1:-60}" in
+  once) INTERVAL=0 ;;
+  *)    INTERVAL=${1:-60} ;;
+esac
+LOGMAX=524288   # 512KB 轮转
+
+log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> "$LOG" 2>/dev/null; }
+
+rotate_log() {
+  local sz=$(wc -c < "$LOG" 2>/dev/null || echo 0)
+  if [ "$sz" -gt "$LOGMAX" ]; then
+    tail -c 131072 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
+    log "--- 日志已轮转 ---"
+  fi
+}
+
+hb_age() {
+  local ts=$(head -1 "$RT/heartbeat" 2>/dev/null | tr -d '\r\n')
+  case "$ts" in
+    ''|*[!0-9]*) echo 999999; return ;;
+  esac
+  local now=$(date +%s%3N 2>/dev/null)
+  case "$now" in
+    ''|*[!0-9]*) echo 999999; return ;;
+  esac
+  echo $(( (now - ts) / 1000 ))
+}
+
+port_no() { cat "$RT/port" 2>/dev/null | tr -d '\r\n'; }
+
+# ★ 必须读绑定地址，不能假死回环！
+#
+#   2026-10-30 实测（这条坑了一个小时）：
+#     curl 127.0.0.1:13081     → 000   ← 误判引擎死了
+#     curl 100.93.28.42:13081  → 401   ← 引擎其实活得好好的
+#   原因：新壳的引擎绑的是 Tailscale 接口地址（EngineLauncher.pickBindHost 的选择），
+#   根本没有进程监听 127.0.0.1。旧壳绑的是通配地址，所以探回环能通 ——
+#   照抄旧壳的探测方式就会一直误判。
+bind_host() {
+  local h=$(cat "$RT/host" 2>/dev/null | tr -d '\r\n')
+  case "$h" in
+    ''|*[!0-9a-fA-F:.]*) echo 127.0.0.1 ;;
+    *) echo "$h" ;;
+  esac
+}
+
+# 探端口：401 = 健康（认证门在工作）；000 = 不通
+# 注意：不要写 `|| echo 000` —— curl 失败时 -w 已经输出 000，会拼成 000000
+probe() {
+  local p=$(port_no)
+  local h=$(bind_host)
+  case "$p" in
+    ''|*[!0-9]*) echo 000; return ;;
+  esac
+  curl -s -o /dev/null -w '%{http_code}' --max-time 4 "http://$h:$p/" 2>/dev/null
+}
+
+# 端口有没有在 LISTEN（区分「进程在但僵死」和「根本没起」）
+is_listening() {
+  local p=$(port_no)
+  case "$p" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  ss -tln 2>/dev/null | grep -q ":$p " && return 0
+  return 1
+}
+
+app_alive() {
+  pidof "$PKG" >/dev/null 2>&1 && return 0
+  ps -A 2>/dev/null | grep -q "$PKG" && return 0
+  return 1
+}
+
+write_restart_flag() {
+  echo 1 > "$RT/restart" 2>/dev/null || return 1
+  chown u0_a295:u0_a295 "$RT/restart" 2>/dev/null
+  chmod 600 "$RT/restart" 2>/dev/null
+  return 0
+}
+
+# 记录冻结起点，用于判断「冻了多久」
+FROZEN_SINCE=0
+now_s() { date +%s 2>/dev/null || echo 0; }
+
+handle() {
+  local frozen=$(cat "$CF" 2>/dev/null | tr -d '\r\n')
+  local age=$(hb_age)
+  local code=$(probe)
+  local listening="no"
+  is_listening && listening="yes"
+
+  # ---- 一切正常 ----
+  if [ "$code" = "401" ] && [ "$frozen" = "0" ] && [ "$age" -lt "$HB_DEAD" ]; then
+    [ "$FROZEN_SINCE" != "0" ] && { log "恢复正常（冻结持续 $(( $(now_s) - FROZEN_SINCE ))s）"; FROZEN_SINCE=0; }
+    return 0
+  fi
+
+  log "异常: freeze=${frozen:-?} hb=${age}s port=$code listen=$listening app=$(app_alive && echo yes || echo no)"
+
+  # ---- ① 冻结：只解冻，不碰界面 ----
+  if [ "$frozen" = "1" ]; then
+    [ "$FROZEN_SINCE" = "0" ] && FROZEN_SINCE=$(now_s)
+    local dur=$(( $(now_s) - FROZEN_SINCE ))
+    log "检测到冻结（已持续 ${dur}s）→ 写 cgroup.freeze=0（不亮屏）"
+    echo 0 > "$CF" 2>/dev/null
+    sleep 6
+    if [ "$(probe)" = "401" ]; then
+      log "解冻后立即恢复 ✓（冻结 ${dur}s，短冻结不必重启引擎）"
+      return 0
+    fi
+    log "解冻后端口仍 $code → 事件循环已停摆（冻太久），必须重启引擎进程"
+    # 08 的判断：冻超 5 分钟基本救不回来，直接走重启，不必再试
+    if [ "$dur" -ge 300 ]; then
+      log "冻结时长 ${dur}s >= 300s，按经验直接重启引擎"
+    fi
+  fi
+
+  # ---- ③ App 看护已死（心跳超时）：写文件没人读，只能冷启动 ----
+  if [ "$age" -ge "$HB_DEAD" ]; then
+    log "心跳 ${age}s 未更新 → App 看护已死（超过 ${HB_DEAD}s）"
+    if app_alive; then
+      log "但 App 进程还在 → 服务可能被系统杀了，尝试冷启动（会亮屏）"
+    else
+      log "App 进程也不在 → 冷启动（会亮屏）"
+    fi
+    am start -n "$PKG/.MainActivity" >/dev/null 2>&1
+    sleep "$COLD_WAIT"
+    if [ "$(probe)" = "401" ]; then
+      log "冷启动后恢复 ✓"
+      return 0
+    fi
+    log "冷启动后仍 $code"
+    return 1
+  fi
+
+  # ---- ② App 看护活着：用 restart 文件让它自己重启引擎（不亮屏）----
+  if app_alive; then
+    log "App 看护在线（心跳 ${age}s 前）→ 写 restart 信号，让 App 自己重启引擎（不亮屏）"
+    if write_restart_flag; then
+      sleep "$RESTART_WAIT"
+      if [ "$(probe)" = "401" ]; then
+        log "restart 生效 ✓ 新端口 $(port_no)"
+        return 0
+      fi
+      # 二次确认：可能刚好卡在启动的最后一秒，再给 15 秒宽限
+      log "restart 等待 ${RESTART_WAIT}s 后仍 $(probe)，再宽限 15s"
+      sleep 15
+      if [ "$(probe)" = "401" ]; then
+        log "宽限期内恢复 ✓ 新端口 $(port_no)"
+        return 0
+      fi
+      log "restart 后仍 $(probe) → 升级处置"
+    else
+      log "restart 文件写不进去（权限？）→ 升级处置"
+    fi
+  fi
+
+  # ---- ④ 最后手段：冷启动 App（会亮屏）----
+  log "=== 最后的冷启动（会亮屏）==="
+  am start -n "$PKG/.MainActivity" >/dev/null 2>&1
+  sleep "$COLD_WAIT"
+  if [ "$(probe)" = "401" ]; then
+    log "冷启动恢复 ✓"
+    return 0
+  fi
+  log "冷启动后仍不通 port=$(probe) —— 需要人工介入"
+  return 1
+}
+
+# ---- 单实例锁 ----
+# ★ 2026-10-30 教训：once 模式原来不锁，我在调试时并发跑了 4 个 once，
+#   它们互相踩：A 刚写完 restart，B 又写一遍；A 还在等 80s，B 已经判定失败去冷启动了。
+#   结果误触发了两次「冷启动」（会亮屏抢前台）。
+#   现在 once 也锁 —— 调试期间尤其需要。
+if [ -f "$LOCK" ]; then
+  opid=$(cat "$LOCK" 2>/dev/null)
+  case "$opid" in
+    ''|*[!0-9]*) ;;
+    *)
+      if [ "$opid" != "$$" ] && kill -0 "$opid" 2>/dev/null; then
+        echo "已有实例 pid=$opid 在跑，退出"
+        exit 0
+      fi
+      ;;
+  esac
+fi
+echo $$ > "$LOCK"
+trap 'rm -f "$LOCK"' INT TERM EXIT
+
+log "start v2 pid=$$ interval=${INTERVAL}s pkg=$PKG"
+
+if [ "$INTERVAL" = "0" ]; then
+  rotate_log
+  handle
+  rc=$?
+  log "once 完成 rc=$rc"
+  exit $rc
+fi
+
+while true; do
+  rotate_log
+  handle
+  sleep "$INTERVAL"
+done
