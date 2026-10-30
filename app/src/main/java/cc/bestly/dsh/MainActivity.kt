@@ -60,6 +60,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        requestStoragePermissions()
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -68,6 +69,33 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    /**
+     * 存储权限（2026-10-30 补，零八在新壳里实测发现的第一个真缺陷）
+     *
+     * 症状：App 身份写 /sdcard/DSH-Workspace 报 Operation not permitted（读可以）；
+     *      用 su -c 写可以，但那写出来的文件属主是 root，与 App 身份写的 u0_a295 混在一起，
+     *      将来排查权限问题会多一个变量。
+     *
+     * 为什么必须在代码里申请：targetSdk=28 下这两条是危险权限，
+     *      只在 Manifest 声明不生效，必须运行时 requestPermissions。
+     *
+     * 申请失败不阻塞启动：引擎本身只需要 INTERNET，存储权限只影响「用 App 身份
+     *      读写工作区」。失败时引擎照常跑，用户之后在系统设置里给也行。
+     */
+    private fun requestStoragePermissions() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val needed = listOf(
+            android.Manifest.permission.READ_EXTERNAL_STORAGE,
+            android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+        ).filter {
+            checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (needed.isNotEmpty()) {
+            requestPermissions(needed.toTypedArray(), 1001)
+        }
+    }
+
 }
 
 @Composable
