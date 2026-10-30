@@ -17,6 +17,25 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
+      存储权限（2026-10-30 补，零八在新壳里实测发现的第一个真缺陷）。
+
+      症状：touch /storage/emulated/0/DSH-Workspace/x → Operation not permitted
+            读可以，写不行；用 su -c 写可以（root 不受限）。
+
+      原因：targetSdk=28 走的是「旧存储模型」，读写外部存储必须显式声明这两条。
+            漏了它们不是"降级"而是"完全没有"——dumpsys 里一条存储权限都没有。
+
+      为什么不需要 MANAGE_EXTERNAL_STORAGE：
+            targetSdk=28 只要这两条就够管 /sdcard 全域，不必申请那种全盘管理权限
+            （旧壳也没真正拿到 MANAGE_EXTERNAL_STORAGE，granted=false）。
+
+      ⚠ 提醒：用 su -c 写出来的文件属主是 root，用 App 身份写的是 u0_a295。
+              两种属主混在一个工作区里，将来查权限问题会多一个变量 —— 别混用。
+    -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+
+    <!--
       usesCleartextTraffic 是必须的。
       targetSdk >= 28 默认禁止明文 HTTP，而引擎只在 127.0.0.1 上用 http 提供服务
       （dsh web 不带 TLS）。不加这条，WebView 会直接白屏并报
