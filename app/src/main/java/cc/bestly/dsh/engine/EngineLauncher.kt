@@ -54,6 +54,24 @@ object EngineLauncher {
     @Volatile
     private var lastCtx: Context? = null
 
+    /**
+     * 启动代号。每次 start() 递增。
+     *
+     * ★ 2026-10-30 新增，为了断掉一类竞态：
+     *   restart() 会 cancel 掉旧的 readerJob，旧协程正在阻塞读 stdout，
+     *   被取消时抛 "read interrupted"，它自己的 catch 会把它当成启动失败，
+     *   从而把「已经启动成功的新实例」的状态覆盖成 Failed。
+     *
+     *   实测证据（v0.8.2 上）：
+     *     19:08:43 强制重启 → 19:08:45 启动异常: read interrupted（旧协程）
+     *     同一秒新引擎 pid=29221 已经在起，19:09:33 还真就绪了
+     *     但界面/状态一直是「启动失败」，白等 15s 退避
+     *
+     *   有了代号，旧协程发现「我已经不是最新那次启动」就闭嘴。
+     */
+    @Volatile
+    private var generation = 0
+
     private val _state = MutableStateFlow<EngineState>(EngineState.Idle)
     val state: StateFlow<EngineState> = _state.asStateFlow()
 
@@ -202,17 +220,26 @@ object EngineLauncher {
         _state.value = EngineState.Starting
         appendLog("=== 启动引擎 (host=$bindHost port=$freePort) ===")
 
+        val myGen = ++generation
         readerJob = scope.launch(Dispatchers.IO) {
             try {
-                doStart(ctx, freePort, bindHost)
+                doStart(ctx, freePort, bindHost, myGen)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // 协程被主动取消（restart/stop）—— 这是正常控制流，绝不能当失败
+                appendLog("启动协程被取消（gen=$myGen）")
+                throw e
             } catch (e: Exception) {
-                _state.value = EngineState.Failed("启动异常: ${e.message}")
-                appendLog("启动异常: ${e.message}")
+                if (myGen != generation) {
+                    appendLog("旧启动异常（gen=$myGen 已被 gen=$generation 取代，忽略）: ${e.message}")
+                } else {
+                    _state.value = EngineState.Failed("启动异常: ${e.message}")
+                    appendLog("启动异常: ${e.message}")
+                }
             }
         }
     }
 
-    private suspend fun doStart(ctx: Context, port: Int, bindHost: String) = withContext(Dispatchers.IO) {
+    private suspend fun doStart(ctx: Context, port: Int, bindHost: String, myGen: Int) = withContext(Dispatchers.IO) {
         val payload = payloadDir(ctx)
         val dshHome = dshHomeDir(ctx).apply { mkdirs() }
         val runtime = runtimeDir(ctx).apply { mkdirs() }
@@ -344,7 +371,7 @@ object EngineLauncher {
             //     ② 还会把 process 置空，让新引擎从此无人接管（健康检查也看不到了）
             //   实测证据：19:03:31 外部重启后立刻变成「启动失败」，
             //   白等了 15 秒退避才重新拉起 —— 就是这条。
-            if (process === proc) {
+            if (process === proc && myGen == generation) {
                 if (_state.value is EngineState.Running || _state.value is EngineState.Starting) {
                     _state.value = EngineState.Failed("进程退出 code=$exit（见下方日志）")
                 }

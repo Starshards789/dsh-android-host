@@ -207,7 +207,7 @@ class EngineService : Service() {
         is EngineState.Idle -> "未启动"
         is EngineState.Starting -> "启动中…"
         is EngineState.Running -> "运行中 · 端口 ${st.port}"
-        is EngineState.Failed -> "启动失败"
+        is EngineState.Failed -> "启动失败 · ${st.reason}"
     }
 
     private fun buildNotification(text: String): Notification {
