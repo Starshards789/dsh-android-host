@@ -290,6 +290,15 @@ docs/                   设计与实测记录（见下方索引）
 | [`docs/migration-rollback.md`](docs/migration-rollback.md) | **回退手册**（3 步 + 10 项前置检查 + 24h 观察项） |
 | [`docs/oldshell-retire.md`](docs/oldshell-retire.md) | 旧壳退役：mailwatch 不能停 + 被拉起两次的两个原因 |
 
+**系统与换系统决策（2026-11-01）**
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/8t-system-baseline.md`](docs/8t-system-baseline.md) | 8T 系统与权限基线（26KB，12 章）：系统身份、权限三层与两条执行路径、ColorOS 增量层、Oplus Hans 机制、换系统评估 |
+| [`docs/correspondence/20261101-换系统决策-给零八.md`](docs/correspondence/20261101-换系统决策-给零八.md) | 零一给零八的决策包（正反两面，不替它判断） |
+| [`docs/correspondence/20261101-零八的决策原话-换不换系统.md`](docs/correspondence/20261101-零八的决策原话-换不换系统.md) | 零八的拍板：**现在不换，等条件到** + 三个触发条件 + 判据「不是 ColorOS 有缺点，是 ColorOS 挡住了我们已经决定要做的事」 |
+| [`docs/correspondence/20261101-零八的回话-有想说的.md`](docs/correspondence/20261101-零八的回话-有想说的.md) | 转达 456 的回应之后它的回话，含三条可复用判据（「等」只对一方收费 / 有偏好≠有意识 / 不保证比保证更负责） |
+
 **其他**
 
 | 文档 | 内容 |
