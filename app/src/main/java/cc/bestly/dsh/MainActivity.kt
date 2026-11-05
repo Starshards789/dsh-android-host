@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,6 +26,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -62,9 +66,29 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         requestStoragePermissions()
         setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    EngineScreen(this)
+            // 主题：0 = 跟随系统，1 = 浅色，2 = 深色。
+            // 持久化到 SharedPreferences —— 长期用下来多数场景希望固定深色。
+            val prefs = remember { getSharedPreferences("dsh_prefs", MODE_PRIVATE) }
+            var themeMode by remember { mutableStateOf(prefs.getInt("theme_mode", 0)) }
+            val systemDark = isSystemInDarkTheme()
+            val dark = when (themeMode) {
+                1 -> false
+                2 -> true
+                else -> systemDark
+            }
+            MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    EngineScreen(
+                        activity = this,
+                        themeMode = themeMode,
+                        onThemeChange = { m ->
+                            themeMode = m
+                            prefs.edit().putInt("theme_mode", m).apply()
+                        }
+                    )
                 }
             }
         }
@@ -106,7 +130,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun EngineScreen(activity: ComponentActivity) {
+fun EngineScreen(
+    activity: ComponentActivity,
+    themeMode: Int,
+    onThemeChange: (Int) -> Unit
+) {
     val state by EngineLauncher.state.collectAsState()
     val log by EngineLauncher.log.collectAsState()
     val missing = remember { EngineLauncher.preflight(activity) }
@@ -117,6 +145,9 @@ fun EngineScreen(activity: ComponentActivity) {
     // 对话模式：全屏 WebView 直接加载引擎的 Web UI。
     // token 走 URL 参数 —— 这是 dsh 唯一的认证方式（没有 header 认证）。
     var copiedHint by remember { mutableStateOf(0) }
+
+    // 状态卡展开 / 收起。两个地址按钮加上以后卡片很高，收起时只留状态标题与端口。
+    var cardExpanded by remember { mutableStateOf(true) }
 
     if (showWeb && runningState != null) {
         EngineWebView(
@@ -143,8 +174,23 @@ fun EngineScreen(activity: ComponentActivity) {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        Text("dsh host", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text("P1.1 · 宿主骨架", fontSize = 12.sp, color = Color.Gray)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("dsh host", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text("P1.1 · 宿主骨架", fontSize = 12.sp, color = Color.Gray)
+            }
+            // 主题：跟随系统 → 浅色 → 深色 → 循环。选择存在 SharedPreferences 里。
+            TextButton(onClick = { onThemeChange((themeMode + 1) % 3) }) {
+                Text(
+                    when (themeMode) {
+                        1 -> "浅色"
+                        2 -> "深色"
+                        else -> "跟随系统"
+                    },
+                    fontSize = 11.sp
+                )
+            }
+        }
         Spacer(Modifier.height(14.dp))
 
         // ---------- 状态卡 ----------
@@ -153,17 +199,32 @@ fun EngineScreen(activity: ComponentActivity) {
             colors = CardDefaults.cardColors(containerColor = stateColor(state))
         ) {
             Column(Modifier.padding(16.dp)) {
-                Text(
-                    text = stateTitle(state),
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(stateSubtitle(state), fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = stateTitle(state),
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            stateSubtitle(state),
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.85f)
+                        )
+                    }
+                    TextButton(onClick = { cardExpanded = !cardExpanded }) {
+                        Text(
+                            if (cardExpanded) "收起 ▲" else "展开 ▼",
+                            fontSize = 11.sp,
+                            color = Color.White
+                        )
+                    }
+                }
 
                 val s = state
-                if (s is EngineState.Running) {
+                if (s is EngineState.Running && cardExpanded) {
                     Spacer(Modifier.height(10.dp))
                     Text("PID    ${s.pid}", fontSize = 12.sp, color = Color.White, fontFamily = FontFamily.Monospace)
                     Text("PORT   ${s.port}", fontSize = 12.sp, color = Color.White, fontFamily = FontFamily.Monospace)
