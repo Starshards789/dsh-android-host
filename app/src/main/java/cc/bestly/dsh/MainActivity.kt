@@ -408,7 +408,35 @@ private fun EngineWebView(port: Int, token: String, onBack: () -> Unit) {
                         builtInZoomControls = false
                         displayZoomControls = false
                     }
-                    webViewClient = WebViewClient()
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            // WebView 里 100vh / 100dvh 会算成 0 —— 同一个页面在系统浏览器
+                            // （Jelly）里是正常的，说明是容器侧的问题，不是页面。
+                            // dsh 的弹窗和滚动区用 vh 控高，max-height 于是变成非法值，
+                            // 容器塌陷、内容被 overflow:hidden 裁掉（实测只剩一个输入框）。
+                            // 这里用 innerHeight 换算成 px 覆盖掉那几条规则。
+                            // CSS 注入是全局生效的，不需要目标元素已存在。
+                            val js = """
+                                (function(){
+                                  var h = window.innerHeight;
+                                  if (!h) return;
+                                  var old = document.getElementById('__vh_fix');
+                                  if (old) old.remove();
+                                  var s = document.createElement('style');
+                                  s.id = '__vh_fix';
+                                  s.textContent = [
+                                    '[class*="jLrgrW_content"]{max-height:'+(h-96)+'px !important}',
+                                    '[class*="_dialog_"]{max-height:'+(h-96)+'px !important}',
+                                    '[class*="_scrollable_"]{max-height:'+(h-24)+'px !important}',
+                                    '[class*="_confirmation_"]{max-height:'+(h-48)+'px !important}'
+                                  ].join('');
+                                  document.head.appendChild(s);
+                                })();
+                            """.trimIndent()
+                            view?.evaluateJavascript(js, null)
+                        }
+                    }
                     loadUrl("http://127.0.0.1:$port/?token=$token")
                 }
             },
