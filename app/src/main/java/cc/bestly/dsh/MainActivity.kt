@@ -55,6 +55,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.viewinterop.AndroidView
+import android.view.ViewGroup
+import android.widget.FrameLayout
 
 /**
  * P1.1 —— 宿主骨架
@@ -475,7 +477,10 @@ private fun EngineWebView(port: Int, token: String, onBack: () -> Unit) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
-                WebView(ctx).apply {
+                // 外面这层 FrameLayout 是给 window.open 的新窗口留的挂载点：
+                // 登录页要真显示出来才走得通，而新窗口必须和主 WebView 共用一个容器。
+                FrameLayout(ctx).apply {
+                addView(WebView(ctx).apply {
                     settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true      // dsh web 依赖 localStorage
@@ -515,32 +520,61 @@ private fun EngineWebView(port: Int, token: String, onBack: () -> Unit) {
                             isUserGesture: Boolean,
                             resultMsg: Message
                         ): Boolean {
+                            // dsh 点「登录 DeepSeek 账号」时用 window.open 开新窗口。
+                            //
+                            // 第一版做法是「不真开窗口，把新窗口的 URL 塞回主 WebView」，
+                            // 实测失败：主 WebView 会先被 window.open 的占位导航带去
+                            // about:blank，我们的 loadUrl 紧接着被它覆盖，屏幕只剩黑底。
+                            //
+                            // 正确做法是让新窗口真的存在并盖在主页面上：登录页自己完成
+                            // 手机号 + 验证码，授权后回跳 127.0.0.1:13081，页面调
+                            // window.close()，走 onCloseWindow 把这一层拆掉。
                             val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
-                            val popup = WebView(view.context)
-                            popup.webViewClient = object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(
-                                    v: WebView,
-                                    request: WebResourceRequest
-                                ): Boolean {
-                                    takeOver(request.url.toString())
-                                    return true
+                            val popup = WebView(view.context).apply {
+                                settings.apply {
+                                    javaScriptEnabled = true
+                                    domStorageEnabled = true
+                                    databaseEnabled = true
+                                    cacheMode = WebSettings.LOAD_DEFAULT
+                                    setSupportZoom(false)
+                                    builtInZoomControls = false
+                                    displayZoomControls = false
+                                    setSupportMultipleWindows(true)
+                                    javaScriptCanOpenWindowsAutomatically = true
                                 }
-
-                                override fun onPageStarted(v: WebView, url: String?, favicon: android.graphics.Bitmap?) {
-                                    // 兜底：有些 window.open 不走 shouldOverrideUrlLoading
-                                    if (!url.isNullOrBlank() && !url.startsWith("about:")) takeOver(url)
-                                }
-
-                                private fun takeOver(target: String) {
-                                    view.post {
-                                        if (target.startsWith("about:")) return@post
-                                        view.loadUrl(target)
+                                webViewClient = object : WebViewClient() {
+                                    override fun shouldOverrideUrlLoading(
+                                        v: WebView,
+                                        request: WebResourceRequest
+                                    ): Boolean {
+                                        val scheme = request.url.scheme ?: return false
+                                        if (scheme != "http" && scheme != "https") {
+                                            try {
+                                                v.context.startActivity(Intent(Intent.ACTION_VIEW, request.url))
+                                            } catch (_: Exception) {
+                                            }
+                                            return true
+                                        }
+                                        return false
                                     }
                                 }
                             }
                             transport.webView = popup
                             resultMsg.sendToTarget()
+                            (view.parent as? ViewGroup)?.addView(
+                                popup,
+                                ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                            )
+                            popup.bringToFront()
                             return true
+                        }
+
+                        override fun onCloseWindow(window: WebView) {
+                            (window.parent as? ViewGroup)?.removeView(window)
+                            window.destroy()
                         }
                     }
                     webViewClient = object : WebViewClient() {
@@ -608,16 +642,27 @@ private fun EngineWebView(port: Int, token: String, onBack: () -> Unit) {
                         }
                     }
                     loadUrl("http://127.0.0.1:$port/?token=$token")
+                }, ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                ))
                 }
             },
-            onRelease = { wv ->
+            onRelease = { root ->
                 // WebView 不会被 Compose 自动回收。不写这段的话，每进出一次对话页
                 // 就留下一个空 WebView 叠在顶上，它会吞掉之后所有触摸事件
                 // （实测：两个 WebView 叠加时 input tap 的 touch/click 计数恒为 0，
                 //  进程重启后只剩一个就立刻恢复正常）。
-                wv.stopLoading()
-                wv.loadUrl("about:blank")
-                wv.destroy()
+                if (root is ViewGroup) {
+                    for (i in 0 until root.childCount) {
+                        (root.getChildAt(i) as? WebView)?.let { wv ->
+                            wv.stopLoading()
+                            wv.loadUrl("about:blank")
+                            wv.destroy()
+                        }
+                    }
+                    root.removeAllViews()
+                }
             }
         )
     }
