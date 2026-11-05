@@ -453,7 +453,7 @@ object EngineLauncher {
     // ---------- 辅助 ----------
 
     /**
-     * 把 runtime/*.log 里残留的 token 明文脱敏。
+     * 把 runtime 目录下的 *.log 里残留的 token 明文脱敏。
      * 引擎启动时会把 `?token=xxx` 打进自己写的 engine.log，壳管不了它写什么，
      * 只能每轮启动前扫一遍。
      */
