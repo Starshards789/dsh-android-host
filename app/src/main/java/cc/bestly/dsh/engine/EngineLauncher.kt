@@ -175,12 +175,18 @@ object EngineLauncher {
     /**
      * 绑定地址。
      *
-     * 只能绑 127.0.0.1 —— 这是 dsh >= 1.14 的硬限制，不是我们的选择。
-     * 外部（Tailscale / 中继 / 浏览器）经 iptables REDIRECT 接入：
-     *   iptables -t nat -A PREROUTING -i tun1 -p tcp --dport <port> -j REDIRECT --to-port <port>
-     * 好处是引擎进程根本不监听外部接口，比绑 0.0.0.0 靠防火墙挡更安全。
+     * dsh >= 1.14 的 schema 只允许 127.0.0.1 / 0.0.0.0 两个值，不能填具体网卡地址。
+     * 这里选 0.0.0.0 —— 因为在 Android 上「绑回环 + iptables REDIRECT 到 127.0.0.1」
+     * 实测走不通（2026-11-06 在 LineageOS 24 上验过：规则 pkts 涨了，但连接被拒，
+     * 开 route_localnet=1 也没用）。
+     *
+     * 绑通配后靠 iptables 收口，只放 tun1（Tailscale）和 lo：
+     *   iptables -A INPUT -p tcp --dport <port> -i lo   -j ACCEPT
+     *   iptables -A INPUT -p tcp --dport <port> -i tun1 -j ACCEPT
+     *   iptables -A INPUT -p tcp --dport <port>        -j DROP
+     * 规则由 /data/adb/service.d/40-dsh-firewall.sh 开机重建。
      */
-    private fun pickBindHost(): Pair<String, String> = "127.0.0.1" to "loopback(dsh>=1.14)"
+    private fun pickBindHost(): Pair<String, String> = "0.0.0.0" to "wildcard(iptables 收口 tun1)"
 
     /**
      * /api 的浏览器信任栅栏接受的 authority。
