@@ -362,6 +362,15 @@ private fun EngineWebView(port: Int, token: String, onBack: () -> Unit) {
                     webViewClient = WebViewClient()
                     loadUrl("http://127.0.0.1:$port/?token=$token")
                 }
+            },
+            onRelease = { wv ->
+                // WebView 不会被 Compose 自动回收。不写这段的话，每进出一次对话页
+                // 就留下一个空 WebView 叠在顶上，它会吞掉之后所有触摸事件
+                // （实测：两个 WebView 叠加时 input tap 的 touch/click 计数恒为 0，
+                //  进程重启后只剩一个就立刻恢复正常）。
+                wv.stopLoading()
+                wv.loadUrl("about:blank")
+                wv.destroy()
             }
         )
     }
