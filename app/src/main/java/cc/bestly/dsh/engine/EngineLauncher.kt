@@ -462,7 +462,7 @@ object EngineLauncher {
             runtimeDir(ctx).listFiles()?.forEach { f ->
                 if (!f.isFile || !f.name.endsWith(".log")) return@forEach
                 val text = f.readText()
-                val clean = TOKEN_IN_LOG.replace(text, "$1***")
+                val clean = TOKEN_IN_LOG.replace(text) { it.groupValues[1] + "***" }
                 if (clean != text) f.writeText(clean)
             }
         } catch (_: Exception) {
@@ -478,7 +478,7 @@ object EngineLauncher {
      */
     private fun appendLog(line: String) {
         // 日志既显示在界面上、也写到文件里 —— token 一律打码，明文不落这两处。
-        val safe = TOKEN_IN_LOG.replace(line, "$1***")
+        val safe = TOKEN_IN_LOG.replace(line) { it.groupValues[1] + "***" }
         _log.value = (_log.value + safe).takeLast(400)
         val ctx = lastCtx ?: return
         try {
