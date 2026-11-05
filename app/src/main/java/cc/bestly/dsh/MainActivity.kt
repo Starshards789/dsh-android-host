@@ -116,7 +116,7 @@ fun EngineScreen(activity: ComponentActivity) {
 
     // 对话模式：全屏 WebView 直接加载引擎的 Web UI。
     // token 走 URL 参数 —— 这是 dsh 唯一的认证方式（没有 header 认证）。
-    var copiedHint by remember { mutableStateOf(false) }
+    var copiedHint by remember { mutableStateOf(0) }
 
     if (showWeb && runningState != null) {
         EngineWebView(
@@ -175,22 +175,62 @@ fun EngineScreen(activity: ComponentActivity) {
                         fontFamily = FontFamily.Monospace
                     )
                     Spacer(Modifier.height(8.dp))
-                    // 首次访问必须带 token 才能种 cookie；一键复制省掉手拼长串
+                    // 两个地址分开给，用途不同，不能只给一个：
+                    //   回环 —— App 内 WebView 与本机浏览器。登录 / 填 API Key 只有走它才行，
+                    //           OAuth 回调只认 127.0.0.1 / localhost / [::1]。
+                    //   Tailscale —— 其他设备访问页面。它不能完成登录与填 Key。
+                    // 引擎绑的是 0.0.0.0（dsh ≥ 1.14 只接受这个或 127.0.0.1），
+                    // 两条路天然都通；外部侧由 service.d 的 iptables 只放行 tun1 收口。
                     val ctxCopy = LocalContext.current
+                    val cm = ctxCopy.getSystemService(
+                        android.content.Context.CLIPBOARD_SERVICE
+                    ) as android.content.ClipboardManager
+                    val tsIp = remember { EngineLauncher.findTailscaleIpv4() }
+                    val loopUrl = "http://127.0.0.1:${s.port}/?token=${s.token}"
+                    val tsUrl = tsIp?.let { "http://$it:${s.port}/?token=${s.token}" }
+
                     Button(
                         onClick = {
-                            val url = "http://${s.host}:${s.port}/?token=${s.token}"
-                            val cm = ctxCopy.getSystemService(
-                                android.content.Context.CLIPBOARD_SERVICE
-                            ) as android.content.ClipboardManager
                             cm.setPrimaryClip(
-                                android.content.ClipData.newPlainText("dsh url", url)
+                                android.content.ClipData.newPlainText("dsh loopback", loopUrl)
                             )
-                            copiedHint = true
+                            copiedHint = 1
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(if (copiedHint) "已复制，去浏览器粘贴" else "复制访问链接")
+                        Text(if (copiedHint == 1) "已复制本机地址" else "复制本机地址 127.0.0.1")
+                    }
+                    Text(
+                        "App 内 / 本机浏览器。登录、填 API Key 必须用这个 —— OAuth 回调只认回环。",
+                        fontSize = 10.sp,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    if (tsUrl != null) {
+                        Button(
+                            onClick = {
+                                cm.setPrimaryClip(
+                                    android.content.ClipData.newPlainText("dsh tailscale", tsUrl)
+                                )
+                                copiedHint = 2
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (copiedHint == 2) "已复制 Tailscale 地址" else "复制 Tailscale 地址 $tsIp")
+                        }
+                        Text(
+                            "其他设备经 Tailscale 打开页面用。这里不能登录，也不能填 API Key。",
+                            fontSize = 10.sp,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
+                    } else {
+                        Text(
+                            "Tailscale 未连接，暂无外部地址（App 内不受影响）",
+                            fontSize = 10.sp,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
                     }
                     Spacer(Modifier.height(4.dp))
                     Text(
