@@ -1,6 +1,7 @@
 package cc.bestly.dsh
 
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -63,6 +64,19 @@ import androidx.compose.ui.viewinterop.AndroidView
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 主题必须在 super.onCreate 之前定。
+        // WebView 的 prefers-color-scheme 读的是 Activity 的 uiMode，
+        // Compose 换 darkColorScheme 改不了它 —— 不换 window theme，
+        // 内嵌页面就永远认为宿主是浅色，背景不跟主题走。
+        val prefs0 = getSharedPreferences("dsh_prefs", MODE_PRIVATE)
+        val darkNow = when (prefs0.getInt("theme_mode", 0)) {
+            1 -> false
+            2 -> true
+            else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                    Configuration.UI_MODE_NIGHT_YES
+        }
+        setTheme(if (darkNow) R.style.Theme_DshHost else R.style.Theme_DshHost_Light)
+
         super.onCreate(savedInstanceState)
         requestStoragePermissions()
         setContent {
@@ -88,6 +102,10 @@ class MainActivity : ComponentActivity() {
                         onThemeChange = { m ->
                             themeMode = m
                             prefs.edit().putInt("theme_mode", m).apply()
+                            // window theme 只在 onCreate 生效 —— 必须重建 Activity
+                            // 才能让 WebView 的 prefers-color-scheme 跟着变。
+                            // 引擎在 EngineService 里，重建不影响它。
+                            recreate()
                         }
                     )
                 }
@@ -475,27 +493,40 @@ private fun EngineWebView(port: Int, token: String, onBack: () -> Unit) {
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            // WebView 里 100vh / 100dvh 会算成 0 —— 同一个页面在系统浏览器
-                            // （Jelly）里是正常的，说明是容器侧的问题，不是页面。
-                            // dsh 的弹窗和滚动区用 vh 控高，max-height 于是变成非法值，
-                            // 容器塌陷、内容被 overflow:hidden 裁掉（实测只剩一个输入框）。
-                            // 这里用 innerHeight 换算成 px 覆盖掉那几条规则。
-                            // CSS 注入是全局生效的，不需要目标元素已存在。
+                            // WebView 里 100vh / 100dvh / 100svh 一律算成 0，
+                            // 而 window.innerHeight 是正常的（同一个页面在系统浏览器里也没问题）。
+                            // dsh 大量用 vh 控高：弹窗是 max-height: calc(-48px + 100vh)，
+                            // 设置面板是 height: min(800px, -48px + 100vh) ——
+                            // 一旦归零，前者塌成 48px 被裁掉，后者算成 -48px 直接不显示。
+                            // 这里遍历所有样式表，把 vh 系列单位就地换算成 px。
+                            // 只覆盖已知的那几条规则不够 —— 每多一个面板就再塌一次。
                             val js = """
                                 (function(){
                                   var h = window.innerHeight;
                                   if (!h) return;
-                                  var old = document.getElementById('__vh_fix');
-                                  if (old) old.remove();
-                                  var s = document.createElement('style');
-                                  s.id = '__vh_fix';
-                                  s.textContent = [
-                                    '[class*="jLrgrW_content"]{max-height:'+(h-96)+'px !important}',
-                                    '[class*="_dialog_"]{max-height:'+(h-96)+'px !important}',
-                                    '[class*="_scrollable_"]{max-height:'+(h-24)+'px !important}',
-                                    '[class*="_confirmation_"]{max-height:'+(h-48)+'px !important}'
-                                  ].join('');
-                                  document.head.appendChild(s);
+                                  function fixVal(v) {
+                                    if (!v || v.indexOf('vh') < 0) return v;
+                                    return v.replace(/(\d*\.?\d+)(vh|dvh|svh|lvh)/g, function(_, n){
+                                      return (parseFloat(n) * h / 100) + 'px';
+                                    });
+                                  }
+                                  function walk(sheet) {
+                                    var rules;
+                                    try { rules = sheet.cssRules; } catch (e) { return; }
+                                    for (var i = 0; i < rules.length; i++) {
+                                      var r = rules[i];
+                                      if (r.cssRules) { walk(r); continue; }
+                                      if (!r.style) continue;
+                                      var props = ['height','maxHeight','minHeight','maxWidth','minWidth','top','bottom'];
+                                      for (var j = 0; j < props.length; j++) {
+                                        var p = props[j], v = r.style[p];
+                                        if (!v) continue;
+                                        var nv = fixVal(v);
+                                        if (nv !== v) r.style[p] = nv;
+                                      }
+                                    }
+                                  }
+                                  for (var i = 0; i < document.styleSheets.length; i++) walk(document.styleSheets[i]);
                                 })();
                             """.trimIndent()
                             view?.evaluateJavascript(js, null)

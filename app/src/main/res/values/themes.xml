@@ -1,4 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.DshHost" parent="android:Theme.Material.Light.NoActionBar" />
+    <!--
+        深色（默认）。
+
+        WebView 的 prefers-color-scheme 读的是 Activity 的 uiMode，
+        Compose 里换 darkColorScheme 改不了它 —— 所以内嵌页面会一直
+        认为宿主是浅色，背景不跟主题走。要页面真的变深色，
+        Activity 的 window theme 必须真的是深色主题。
+    -->
+    <style name="Theme.DshHost" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF121212</item>
+        <item name="android:statusBarColor">#FF121212</item>
+        <item name="android:navigationBarColor">#FF121212</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <style name="Theme.DshHost.Light" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FFFFFFFF</item>
+        <item name="android:statusBarColor">#FFFFFFFF</item>
+        <item name="android:navigationBarColor">#FFFFFFFF</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
 </resources>
