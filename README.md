@@ -8,7 +8,9 @@ Android 宿主 App for [dsh](https://github.com/deepseek-ai/dsh) —— 给自�
 
 ## 现在是什么状态
 
-**P1.0 / P1.1 / P1.2 / P1.4 / P2 / P3 全部完成并上机实测。P1.3（App 内 WebView）代码完成，但被系统 WebView 版本卡住 —— 已用 P1.4 绕开。**
+**P1.0 / P1.1 / P1.2 / P1.4 / P2 / P3 全部完成并上机实测；P1.3（App 内 WebView）在 LineageOS 24 上已跑通。**
+
+> **2026-11-06**：8T 从 ColorOS 14 刷到 LineageOS 24（Android 17），系统 WebView 升到 156 —— P1.3 的版本卡点消失，App 内直连回环可用。当天从 v0.9.2 迭代到 v0.9.9，逐版本的问题 / 根因 / 修法 / 构建号见 [`docs/CHANGELOG-20261106.md`](docs/CHANGELOG-20261106.md)。
 
 ```
 App 启动 → LaunchedEffect → EngineService(前台服务)
@@ -115,7 +117,7 @@ dsh 还是 beta，官方更新快，所以「能方便地升级」本身是硬�
 私钥只在开发机（另存 Vaultwarden），设备只持公钥（能验不能签）。
 详见 [`docs/trust.md`](docs/trust.md)。
 
-## ⚠️ 已知限制：内置 WebView 需要 Chrome 119+
+## ⚠️ 历史限制：内置 WebView 需要 Chrome 119+（ColorOS 14 时代；LineageOS 24 自带的 WebView 156 已不适用）
 
 P1.3 已在 App 内做了 WebView 对话页（`usesCleartextTraffic` + token 注入 + 全屏），实测：
 
@@ -198,19 +200,18 @@ minTargetSdkVersion=26 → domain=untrusted_app_27   levelFrom=user
 | P9 | 记忆系统第 2–4 步（L0 一页纸 / 三个原生工具 / 后台巩固） | 📝 设计完成，第 3 步等一周观测后决定 |
 | P10 | 主动性（定时 / 目标 / 技能） | 待办 |
 
-### 当前实机状态（2026-10-30 21:20 实测）
+### 当前实机状态（2026-11-06 05:00 实测）
 
 ```
-App        cc.bestly.dsh  v0.8.5  versionCode 13  uid 10295  MCS category c39
-内核       rc.2（运行中），node v26.4.0
-引擎       13081（绑 Tailscale 接口，非回环）  401 = 健康
-工具数     46（官方 41 + 自有 5）
-权限       READ/WRITE_EXTERNAL_STORAGE 均 granted（v0.8.5 补）
-签名       正式签名，apksigner verify 通过
-登录       DeepSeek 账号 OAuth（非 APIKey）
-看护       App watcher（92s 自愈）/ host-guard-v2（root 60s）/ CT106 cronjob（5min）
-中继       tg8-relay → 13081（TG 群「456总控室」正常收发）
-旧壳       com.deepseek.harness 已 pm disable-user，数据 39MB 保留（退路）
+设备       OnePlus 8T KB2000 / LineageOS 24.0-20261030-NIGHTLY-kebab / Android 17
+App        cc.bestly.dsh  v0.9.9  versionCode 23  uid 10179  targetSdk 28
+引擎       0.0.0.0:13081（iptables 只放行 lo / tun1，其余 DROP）
+payload    v1.14.0；三处 Android 补丁已打（host 限制 / koffi stub / ABI size）
+双地址     127.0.0.1:13081（App 内 / 本机浏览器）
+           100.102.144.35:13081（Tailscale，其他设备）
+界面       状态卡可折叠 · 主题三态 · 日志 token 全打码（状态卡 TOKEN 保留明文供复制）
+看护       service.d 四个开机脚本：adb-tcp / tailscale-start / tailscale-watchdog / dsh-firewall
+旧壳       com.deepseek.harness 已退役；数据仍在 2026-11-05 全量备份里，未迁入本机
 记忆       zero-eight 月记 53 行 / 12,025 字节（基线）
 冻结       已解决（ColorOS 三开关按 App 生效，新壳已开）
 ```
