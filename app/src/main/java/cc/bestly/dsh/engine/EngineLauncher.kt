@@ -143,7 +143,15 @@ object EngineLauncher {
         "/data/adb/ap/bin/su",
     ).any { File(it).exists() }
 
-    private fun pickBindHost(): Pair<String, String> {
+    /**
+     * 找 Tailscale 的 IPv4（tun 接口）。
+     *
+     * ★ 2026-11-06 起只用于 --trusted-host，不再用于 --host。
+     * dsh v1.14.0 的 web 命令对 --host 加了 schema 校验：
+     *   $.host expected "127.0.0.1" | "0.0.0.0"
+     * 旧版 payload 能直接把监听地址设成 Tailscale IP，新版不行。
+     */
+    fun findTailscaleIpv4(): String? {
         try {
             val nifs = java.net.NetworkInterface.getNetworkInterfaces()
             while (nifs.hasMoreElements()) {
@@ -155,14 +163,34 @@ object EngineLauncher {
                 while (addrs.hasMoreElements()) {
                     val a = addrs.nextElement()
                     if (a is java.net.Inet4Address && !a.isLoopbackAddress) {
-                        val h = a.hostAddress
-                        if (h != null) return h to "tailscale:$nm"
+                        a.hostAddress?.let { return it }
                     }
                 }
             }
         } catch (_: Throwable) {
         }
-        return "127.0.0.1" to "fallback:loopback"
+        return null
+    }
+
+    /**
+     * 绑定地址。
+     *
+     * 只能绑 127.0.0.1 —— 这是 dsh >= 1.14 的硬限制，不是我们的选择。
+     * 外部（Tailscale / 中继 / 浏览器）经 iptables REDIRECT 接入：
+     *   iptables -t nat -A PREROUTING -i tun1 -p tcp --dport <port> -j REDIRECT --to-port <port>
+     * 好处是引擎进程根本不监听外部接口，比绑 0.0.0.0 靠防火墙挡更安全。
+     */
+    private fun pickBindHost(): Pair<String, String> = "127.0.0.1" to "loopback(dsh>=1.14)"
+
+    /**
+     * /api 的浏览器信任栅栏接受的 authority。
+     *
+     * 必须同时包含回环和 Tailscale 地址：外部请求的 Host 头是 Tailscale IP，
+     * 只放回环会被拒（页面能开、功能不通）。
+     */
+    private fun trustedHosts(port: Int): List<String> = buildList {
+        add("127.0.0.1:$port")
+        findTailscaleIpv4()?.let { add("$it:$port") }
     }
 
     private fun probePorts(host: String): Pair<Int?, List<String>> {
@@ -246,19 +274,19 @@ object EngineLauncher {
         ipcDir(ctx).mkdirs()
         File(ctx.cacheDir, "tmp").mkdirs()
 
-        val authority = "$bindHost:$port"
-        val cmd = listOf(
-            nodeBin(ctx).absolutePath,
-            "--expose-internals",          // ← 缺这个引擎起不来
-            dshEntry(ctx).absolutePath,
-            "web",
-            "--host", bindHost,            // 具体接口地址；通配地址会被 dsh 拒绝
-            "--no-open",
-            "--port", port.toString(),
-            // /api 的浏览器信任栅栏默认只认回环；绑非回环地址时必须显式放行这个权威，
-            // 否则浏览器端 API 请求会被拒（页面能开、功能不通）。
-            "--trusted-host", authority,
-        )
+        val cmd = buildList {
+            add(nodeBin(ctx).absolutePath)
+            add("--expose-internals")          // ← 缺这个引擎起不来
+            add(dshEntry(ctx).absolutePath)
+            add("web")
+            // dsh >= 1.14 只接受 127.0.0.1 / 0.0.0.0，不能填具体网卡地址
+            add("--host"); add(bindHost)
+            add("--no-open")
+            add("--port"); add(port.toString())
+            // /api 的浏览器信任栅栏默认只认回环；外部经 Tailscale 访问时 Host 头是
+            // Tailscale IP，必须逐个放行（--trusted-host 是 repeatable 的）。
+            trustedHosts(port).forEach { add("--trusted-host"); add(it) }
+        }
         appendLog("cmd: ${cmd.joinToString(" ")}")
 
         // 日志文件在 fork 之前就创建 —— 否则 ProcessBuilder 抛异常时什么都留不下

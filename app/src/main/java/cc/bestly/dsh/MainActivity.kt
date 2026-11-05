@@ -85,10 +85,17 @@ class MainActivity : ComponentActivity() {
      */
     private fun requestStoragePermissions() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-        val needed = listOf(
-            android.Manifest.permission.READ_EXTERNAL_STORAGE,
-            android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
-        ).filter {
+        val needed = buildList {
+            add(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+            add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            // ★ Android 13+ 通知也是运行时权限（POST_NOTIFICATIONS）。
+            // 只声明不申请的话，前台服务的常驻通知不会显示 —— 用户看不到引擎在跑，
+            // 2026-11-06 在 LineageOS 24 上实测踩到（装完壳立刻弹的是存储权限，
+            // 通知权限始终 granted=false，得靠 adb 手动补）。
+            if (Build.VERSION.SDK_INT >= 33) {
+                add(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }.filter {
             checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
         }
         if (needed.isNotEmpty()) {
