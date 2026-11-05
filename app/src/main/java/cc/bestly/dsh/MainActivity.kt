@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cc.bestly.dsh.engine.EngineLauncher
 import cc.bestly.dsh.engine.EngineState
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -55,6 +56,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.viewinterop.AndroidView
+import android.app.Activity
 import android.view.ViewGroup
 import android.widget.FrameLayout
 
@@ -557,6 +559,42 @@ private fun EngineWebView(port: Int, token: String, onBack: () -> Unit) {
                                         }
                                         return false
                                     }
+
+                                    // 登录页是一层盖在主界面上的窗口，没有浏览器那种地址栏和关闭按钮。
+                                    // 一旦它自己崩了（实测：授权回调页拉 chunk 被 WAF 429，
+                                    // 页面渲染成「页面出现了一些异常」），用户就只剩「杀 App」一条路。
+                                    // 所以每次加载完成都往右上角放一个 ✕，走 window.close()
+                                    // 触发 onCloseWindow 把这一层拆掉。
+                                    override fun onPageFinished(v: WebView?, url: String?) {
+                                        super.onPageFinished(v, url)
+                                        v?.evaluateJavascript(POPUP_CLOSE_BUTTON_JS, null)
+                                    }
+
+                                    // 渲染进程整个挂掉时 WebView 会变黑且不再响应任何操作。
+                                    // 接管掉，重建 Activity（引擎跑在 Service 里，不受影响）。
+                                    override fun onRenderProcessGone(
+                                        v: WebView,
+                                        detail: RenderProcessGoneDetail
+                                    ): Boolean {
+                                        (v.parent as? ViewGroup)?.removeView(v)
+                                        v.destroy()
+                                        (v.context as? Activity)?.recreate()
+                                        return true
+                                    }
+
+                                    // 弹窗里加载失败也给一条重试路径，不然只能关掉重来
+                                    override fun onReceivedError(
+                                        v: WebView,
+                                        request: WebResourceRequest,
+                                        error: WebResourceError
+                                    ) {
+                                        super.onReceivedError(v, request, error)
+                                        if (!request.isForMainFrame) return
+                                        val desc = (error.description?.toString() ?: "未知错误")
+                                            .replace("\\", "\\\\")
+                                            .replace("'", "\\'")
+                                        v.evaluateJavascript(ERROR_OVERLAY_JS.format(desc), null)
+                                    }
                                 }
                             }
                             transport.webView = popup
@@ -593,6 +631,33 @@ private fun EngineWebView(port: Int, token: String, onBack: () -> Unit) {
                                 return true
                             }
                             return false
+                        }
+
+                        // 主文档加载失败时 WebView 只会留一片空白，没有任何可操作入口。
+                        // 注入一个覆盖全屏的错误浮层，带「重试」按钮（location.reload）。
+                        override fun onReceivedError(
+                            view: WebView,
+                            request: WebResourceRequest,
+                            error: WebResourceError
+                        ) {
+                            super.onReceivedError(view, request, error)
+                            if (!request.isForMainFrame) return
+                            val desc = (error.description?.toString() ?: "未知错误")
+                                .replace("\\", "\\\\")
+                                .replace("'", "\\'")
+                            view.evaluateJavascript(ERROR_OVERLAY_JS.format(desc), null)
+                        }
+
+                        // 渲染进程崩溃（低内存时系统会杀 WebView 进程）→ 整页变黑且触摸全失效。
+                        // 不自愈的话用户只能杀 App；这里重建 Activity 就够了。
+                        override fun onRenderProcessGone(
+                            view: WebView,
+                            detail: RenderProcessGoneDetail
+                        ): Boolean {
+                            (view.parent as? ViewGroup)?.removeView(view)
+                            view.destroy()
+                            (view.context as? Activity)?.recreate()
+                            return true
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
@@ -690,3 +755,53 @@ private fun stopEngineService(ctx: android.content.Context) {
     ctx.stopService(Intent(ctx, EngineService::class.java))
     EngineLauncher.stop()
 }
+
+/**
+ * 弹窗（window.open 出来的那层）右上角的关闭按钮。
+ *
+ * 登录页没有浏览器地址栏，页面自己崩了就没有退路。这个 ✕ 走 window.close()，
+ * WebView 会回调 onCloseWindow，把这一层从 FrameLayout 里移除并销毁。
+ */
+private val POPUP_CLOSE_BUTTON_JS = """
+(function(){
+  if (document.getElementById('__dsh_close')) return;
+  var b = document.createElement('div');
+  b.id = '__dsh_close';
+  b.textContent = '\u2715';
+  b.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;width:36px;height:36px;' +
+    'line-height:36px;text-align:center;border-radius:18px;background:rgba(255,255,255,0.16);' +
+    'color:#fff;font:18px/36px sans-serif;cursor:pointer';
+  b.onclick = function(){ window.close(); };
+  document.body.appendChild(b);
+})();
+""".trimIndent()
+
+/**
+ * 加载失败覆盖层。参数是错误描述（已在 Kotlin 侧转义）。
+ *
+ * 用覆盖层而不是跳错误页，是为了保住当前页面：很多失败是资源被临时拒（WAF 429、
+ * 断网重连），reload 一下就好，没必要把页面栈整个重建。
+ */
+private val ERROR_OVERLAY_JS = """
+(function(m){
+  if (document.getElementById('__dsh_err')) return;
+  var d = document.createElement('div');
+  d.id = '__dsh_err';
+  d.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:#0d0d0d;color:#eee;' +
+    'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;' +
+    'padding:28px;text-align:center;font:14px/1.6 sans-serif';
+  var t = document.createElement('div');
+  t.textContent = '页面加载失败';
+  t.style.cssText = 'font-size:17px;font-weight:600';
+  var s = document.createElement('div');
+  s.textContent = m;
+  s.style.cssText = 'color:#8a8a8a;font-size:12px;max-width:78vw;word-break:break-all';
+  var bt = document.createElement('button');
+  bt.textContent = '重试';
+  bt.style.cssText = 'margin-top:8px;padding:10px 30px;border:0;border-radius:20px;' +
+    'background:#2b6cff;color:#fff;font-size:14px';
+  bt.onclick = function(){ d.remove(); location.reload(); };
+  d.appendChild(t); d.appendChild(s); d.appendChild(bt);
+  document.body.appendChild(d);
+})(%s)
+""".trimIndent()
