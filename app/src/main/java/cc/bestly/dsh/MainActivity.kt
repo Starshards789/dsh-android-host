@@ -48,6 +48,7 @@ import cc.bestly.dsh.engine.EngineLauncher
 import cc.bestly.dsh.engine.EngineState
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
