@@ -232,6 +232,10 @@ object EngineLauncher {
             return
         }
 
+        // 上一轮引擎启动时会把带 token 的 URL 打进 runtime/engine.log。
+        // 新起一轮之前先扫一遍脱敏，避免历史明文越积越多。
+        sanitizeRuntimeLogs(ctx)
+
         val missing = preflight(ctx)
         if (missing.isNotEmpty()) {
             _state.value = EngineState.Failed("环境不全：" + missing.joinToString("；"))
@@ -447,6 +451,23 @@ object EngineLauncher {
     }
 
     // ---------- 辅助 ----------
+
+    /**
+     * 把 runtime/*.log 里残留的 token 明文脱敏。
+     * 引擎启动时会把 `?token=xxx` 打进自己写的 engine.log，壳管不了它写什么，
+     * 只能每轮启动前扫一遍。
+     */
+    private fun sanitizeRuntimeLogs(ctx: Context) {
+        try {
+            runtimeDir(ctx).listFiles()?.forEach { f ->
+                if (!f.isFile || !f.name.endsWith(".log")) return@forEach
+                val text = f.readText()
+                val clean = TOKEN_IN_LOG.replace(text, "$1***")
+                if (clean != text) f.writeText(clean)
+            }
+        } catch (_: Exception) {
+        }
+    }
 
     /**
      * 记录一行日志。
