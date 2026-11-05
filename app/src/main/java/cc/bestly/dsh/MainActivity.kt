@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     EngineScreen(
                         activity = this,
+                        dark = dark,
                         themeMode = themeMode,
                         onThemeChange = { m ->
                             themeMode = m
@@ -132,6 +133,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun EngineScreen(
     activity: ComponentActivity,
+    dark: Boolean,
     themeMode: Int,
     onThemeChange: (Int) -> Unit
 ) {
@@ -196,7 +198,7 @@ fun EngineScreen(
         // ---------- 状态卡 ----------
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = stateColor(state))
+            colors = CardDefaults.cardColors(containerColor = stateColor(state, dark))
         ) {
             Column(Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -415,11 +417,12 @@ private fun stateSubtitle(s: EngineState): String = when (s) {
     is EngineState.Failed -> s.reason
 }
 
-private fun stateColor(s: EngineState): Color = when (s) {
-    is EngineState.Idle -> Color(0xFF546E7A)
-    is EngineState.Starting -> Color(0xFFF9A825)
-    is EngineState.Running -> Color(0xFF2E7D32)
-    is EngineState.Failed -> Color(0xFFC62828)
+// 深色模式下把四个状态色压暗一档 —— 高饱和色块在暗环境里太刺眼。
+private fun stateColor(s: EngineState, dark: Boolean): Color = when (s) {
+    is EngineState.Idle -> if (dark) Color(0xFF37474F) else Color(0xFF546E7A)
+    is EngineState.Starting -> if (dark) Color(0xFF7A5B00) else Color(0xFFF9A825)
+    is EngineState.Running -> if (dark) Color(0xFF1B4D2E) else Color(0xFF2E7D32)
+    is EngineState.Failed -> if (dark) Color(0xFF7F1D1D) else Color(0xFFC62828)
 }
 
 /**

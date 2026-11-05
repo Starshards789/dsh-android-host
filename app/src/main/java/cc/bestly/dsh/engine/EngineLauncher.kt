@@ -79,6 +79,9 @@ object EngineLauncher {
     private val _log = MutableStateFlow<List<String>>(emptyList())
     val log: StateFlow<List<String>> = _log.asStateFlow()
 
+    // 匹配 URL / 日志里的 token 参数值（token 是 UUID 形态，也可能带 _ -）
+    private val TOKEN_IN_LOG = Regex("(?i)(token=)[A-Za-z0-9_\\-]{6,}")
+
     // ---------- 路径 ----------
 
     fun payloadDir(ctx: Context): File = File(ctx.filesDir, "payload")
@@ -453,13 +456,15 @@ object EngineLauncher {
      * 判断错了一次，白绕一圈。现在同时追加到 `runtime/engine-host.log`。
      */
     private fun appendLog(line: String) {
-        _log.value = (_log.value + line).takeLast(400)
+        // 日志既显示在界面上、也写到文件里 —— token 一律打码，明文不落这两处。
+        val safe = TOKEN_IN_LOG.replace(line, "$1***")
+        _log.value = (_log.value + safe).takeLast(400)
         val ctx = lastCtx ?: return
         try {
             val f = File(runtimeDir(ctx), "engine-host.log")
             val ts = java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US)
                 .format(java.util.Date())
-            f.appendText("$ts  $line\n")
+            f.appendText("$ts  $safe\n")
             if (f.length() > 256 * 1024) {
                 f.writeText(f.readLines().takeLast(1000).joinToString("\n") + "\n")
             }
