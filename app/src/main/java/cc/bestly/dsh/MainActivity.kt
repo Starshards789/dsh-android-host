@@ -493,40 +493,45 @@ private fun EngineWebView(port: Int, token: String, onBack: () -> Unit) {
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            // WebView 里 100vh / 100dvh / 100svh 一律算成 0，
-                            // 而 window.innerHeight 是正常的（同一个页面在系统浏览器里也没问题）。
-                            // dsh 大量用 vh 控高：弹窗是 max-height: calc(-48px + 100vh)，
-                            // 设置面板是 height: min(800px, -48px + 100vh) ——
-                            // 一旦归零，前者塌成 48px 被裁掉，后者算成 -48px 直接不显示。
-                            // 这里遍历所有样式表，把 vh 系列单位就地换算成 px。
-                            // 只覆盖已知的那几条规则不够 —— 每多一个面板就再塌一次。
+                            // WebView 里 100vh / 100dvh / 100svh 恒为 0（innerHeight 却是正常的，
+                            // 同一页面在系统浏览器里也正常）。dsh 大量用 vh 控高：
+                            //   弹窗   max-height: calc(-48px + 100vh)   → 塌成 48px 被裁
+                            //   设置   height: min(800px, -48px + 100vh) → 算成 -48px 直接不显示
+                            // 逐条覆盖已知选择器不可维护，改成遍历全部样式表把 vh 就地换算成 px。
+                            //
+                            // 两个必须注意的点（都踩过）：
+                            //   1. 每条规则要单独 try/catch —— 一条抛异常会中断整轮遍历，
+                            //      之前就是这样只跑到 81 条规则、改了 0 条，还不报错。
+                            //   2. 判断嵌套用 r.cssRules && r.cssRules.length，不能用 if (r.cssRules)。
                             val js = """
                                 (function(){
                                   var h = window.innerHeight;
                                   if (!h) return;
-                                  function fixVal(v) {
-                                    if (!v || v.indexOf('vh') < 0) return v;
-                                    return v.replace(/(\d*\.?\d+)(vh|dvh|svh|lvh)/g, function(_, n){
-                                      return (parseFloat(n) * h / 100) + 'px';
-                                    });
-                                  }
-                                  function walk(sheet) {
-                                    var rules;
-                                    try { rules = sheet.cssRules; } catch (e) { return; }
-                                    for (var i = 0; i < rules.length; i++) {
-                                      var r = rules[i];
-                                      if (r.cssRules) { walk(r); continue; }
-                                      if (!r.style) continue;
-                                      var props = ['height','maxHeight','minHeight','maxWidth','minWidth','top','bottom'];
-                                      for (var j = 0; j < props.length; j++) {
-                                        var p = props[j], v = r.style[p];
-                                        if (!v) continue;
-                                        var nv = fixVal(v);
-                                        if (nv !== v) r.style[p] = nv;
-                                      }
+                                  var RE = /(-?\d*\.?\d+)(vh|dvh|svh|lvh)/g;
+                                  function walk(rs) {
+                                    for (var i = 0; i < rs.length; i++) {
+                                      try {
+                                        var r = rs[i];
+                                        if (r.cssRules && r.cssRules.length) { walk(r.cssRules); continue; }
+                                        if (!r.style) continue;
+                                        var props = ['height','maxHeight','minHeight','maxWidth','minWidth','top','bottom'];
+                                        for (var j = 0; j < props.length; j++) {
+                                          var raw;
+                                          try { raw = r.style[props[j]]; } catch (e) { continue; }
+                                          if (!raw || raw.indexOf('vh') < 0) continue;
+                                          r.style[props[j]] = raw.replace(RE, function(_, n){
+                                            return (parseFloat(n) * h / 100) + 'px';
+                                          });
+                                        }
+                                      } catch (e) {}
                                     }
                                   }
-                                  for (var i = 0; i < document.styleSheets.length; i++) walk(document.styleSheets[i]);
+                                  for (var i = 0; i < document.styleSheets.length; i++) {
+                                    try {
+                                      var rules = document.styleSheets[i].cssRules;
+                                      if (rules) walk(rules);
+                                    } catch (e) {}
+                                  }
                                 })();
                             """.trimIndent()
                             view?.evaluateJavascript(js, null)
