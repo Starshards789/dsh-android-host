@@ -1,6 +1,8 @@
 # 2026-11-06 夜间迭代记录
 
-LineageOS 24 刷机后，dsh 宿主壳（`cc.bestly.dsh`）从 0.9.x 一路修到 0.9.9 的完整过程。
+LineageOS 24 刷机后，dsh 宿主壳（`cc.bestly.dsh`）从 0.9.x 一路修到 1.1.1 的完整过程。
+
+包含两部分：前半程修 WebView 渲染与交互（0.9.x → 1.0.1），后半程把 payload 从 dsh 0.1.5-rc.1 升到 0.2.1-rc.2 并打通「登录 DeepSeek 账号」（1.1.x）。
 
 时间均为 CST（UTC+8）。所有版本都由 GitHub Actions 构建，手机装的是 CI 产物，不是本地打包。
 
@@ -18,6 +20,10 @@ LineageOS 24 刷机后，dsh 宿主壳（`cc.bestly.dsh`）从 0.9.x 一路修�
 | 0.9.7 | `4ca3925` | 42104586612 | success | 日志 token 打码 + 深色卡降饱和 |
 | 0.9.8 | `764fb05`→`189b6d2`→`89c3ccd` | 42105440134 / 42105889519 / 42106220362 | 失败→失败→success | 启动时扫描并脱敏残留 token |
 | 0.9.9 | `49815dc` | 42106787379 | success | 引擎就绪后再脱敏一次（补上漏网的那一轮） |
+| 1.0.0 | — | 42110931762 | success | 对话背景不跟主题（Activity window theme 恒 light） |
+| 1.0.1 | — | 42111974489 | success | `100vh = 0` 通用遍历改写 + 设置面板不显示 |
+| 1.1.0 | `6c78b89` | 42117306105 | success | 支持 `window.open`（第一版，塞回主 WebView，实测失败） |
+| 1.1.1 | `f1a3456` | 42118534422 | success | 登录页真显示（新窗口挂 FrameLayout） |
 
 ---
 
@@ -147,3 +153,96 @@ dsh web: http://127.0.0.1:13081/?token=*** (LAN: http://100.102.144.35:13081/?to
 - 双地址：`127.0.0.1:13081`（App 内 / 本机浏览器，登录填 Key 用这个）、`100.102.144.35:13081`（其他设备，Tailscale）
 - 日志：UI / `engine-host.log` / `engine.log` 三处 token 全部 `***`；状态卡上的 TOKEN 保留明文供复制
 - 未做：payload 三处补丁还没有纳入 CI 自动重打（目前靠 `scripts/apply-android-patches.sh` 手动执行）
+
+---
+
+## 三、payload 升级到 dsh 0.2.1-rc.2
+
+### 为什么要升
+
+v1.14.0 官方 APK（payload 123MB → dsh 0.1.5-rc.1）的首次使用弹窗只有「添加 API Key」。
+v1.20.1 APK（payload 160MB → dsh 0.2.1-rc.2）多了一个「登录 DeepSeek 账号」按钮 ——
+点进去是 `platform.deepseek.com` 的手机号 + 验证码授权页，签发的是 OAuth 凭据而不是裸 API Key。
+
+### 升级动作
+
+```bash
+# 备份旧 cacert
+cp payload/runtime/etc/cacert.pem /data/local/tmp/cacert-1140.pem
+# 换 payload
+mv payload payload.old-v1140 && mkdir payload
+unzip -q /data/local/tmp/payload-1201.zip -d payload   # 566M / 31,021 文件 / 2.6 秒
+# 属主与 context
+chown -R 10180:10180 payload
+chcon -R u:object_r:app_data_file:s0:c180,c256,c512,c768 payload
+# 补丁
+ADB_SERIAL=... ./scripts/apply-android-patches.sh
+# cacert（新版不带）
+cat /system/etc/security/cacerts/* > payload/runtime/etc/cacert.pem   # 751,929 B / 142 张
+```
+
+### 踩的坑
+
+**0.2.1 的 host 封锁有两道**。`startup.js:48` 只是 CLI 前置检查，
+真正 bind 时 `dsh-host-webserver/lib/index.js:255` 还会再拒一次。
+只改前者，引擎会在日志里抛 `webserver: host "0.0.0.0" is an unspecified address`。
+
+**`koffi-stub.cjs` 不见了**。0.1.5 里官方自带 `dsh-subprocess-local/lib/koffi-stub.cjs`，
+0.2.1 没有了。改成把仓库里自己维护的那份推到 `koffi/koffi-stub.cjs`。
+
+**`restructure` 少打包 `src/`**。`office-to-pdf` 插件加载失败，
+`ERR_MODULE_NOT_FOUND: .../restructure/src/EncodeStream.js`。
+`dist/main.cjs` 是完整实现，把 `index.js` 改成从它重新导出即可（51 个导出，比源码入口还全）。
+
+---
+
+## 四、v1.1.x —「登录 DeepSeek 账号」
+
+### 1.1.0 的做法（失败）
+
+想让登录页直接在**主 WebView** 里打开：`setSupportMultipleWindows(true)`，
+在 `onCreateWindow` 里拿 `WebViewTransport` 建了个 popup，
+然后把 popup 的 URL 通过 `view.loadUrl()` 塞回主窗口。
+
+**实测失败**：点「登录」后主窗口变成 `about:blank`，屏幕黑底。
+原因是一条竞态 —— `window.open` 会先把 opener 导航到 `about:blank` 占位，
+我们的 `loadUrl` 紧接着被这次导航覆盖。
+
+CDP 上看得清清楚楚：两个 page，一个是 `about:blank`（主窗口），
+一个是 `platform.deepseek.com/sign_in`（popup，但不在界面上）。
+
+### 1.1.1 的做法（成功）
+
+让新窗口**真的存在并盖在主页面上**：
+
+1. `AndroidView` 的 `factory` 返回 `FrameLayout`，主 WebView 作为它的子 View
+2. `onCreateWindow` 建 popup（完整 WebSettings）→ `transport.webView = popup` → `resultMsg.sendToTarget()`
+3. `(view.parent as? ViewGroup)?.addView(popup, MATCH_PARENT, MATCH_PARENT)` + `bringToFront()`
+4. `onCloseWindow` 里 `removeView` + `destroy()`
+5. `onRelease` 遍历容器回收**所有**子 WebView（不只是主窗口）
+
+**验证**：点「登录」后
+- popup 停在 `https://platform.deepseek.com/sign_in?variant=harness&theme=dark&authorize_id=...`
+- 主 WebView 仍停在 `http://127.0.0.1:13081/`（不再变 about:blank）
+- 屏幕完整显示：DeepSeek logo、`HARNESS` 标签、`+86` 手机号框、验证码框、
+  发送验证码、登录按钮、密码登录、用户协议链接
+
+### 顺手修掉的日志噪音
+
+`office-to-pdf` 那条 `failed to import` + `1 entry did not activate`
+是 payload 打包缺陷（`restructure` 缺 `src/`），打完补丁 4 之后
+`engine.log` 只剩 2 行纯启动信息，两个报错计数都是 0。
+
+---
+
+## 五、安装时的一次意外
+
+**签名不匹配，被迫卸载重装。**
+
+手机上的 1.0.1 证书是 `58801f09`，CI 产物是 `fcff8f90` ——
+前者是 CI 还没配固定 keystore 那批构建留下的，证书对不上，`adb install -r` 直接拒。
+
+处理：`pm uninstall` → 装 1.1.0 → 重新解压 payload → 重打 4 处补丁 → 重授权限。
+**代价**：`dshhome` 清空（本来就 263K 空壳）、旧 payload 备份 `payload.old-v1140` 一并删除。
+
+从 1.1.0 起 CI 用固定 keystore（`secrets.DEBUG_KEYSTORE_B64`），后续版本可覆盖安装。

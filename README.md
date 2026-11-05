@@ -10,7 +10,7 @@ Android 宿主 App for [dsh](https://github.com/deepseek-ai/dsh) —— 给自�
 
 **P1.0 / P1.1 / P1.2 / P1.4 / P2 / P3 全部完成并上机实测；P1.3（App 内 WebView）在 LineageOS 24 上已跑通。**
 
-> **2026-11-06**：8T 从 ColorOS 14 刷到 LineageOS 24（Android 17），系统 WebView 升到 156 —— P1.3 的版本卡点消失，App 内直连回环可用。当天从 v0.9.2 迭代到 v0.9.9，逐版本的问题 / 根因 / 修法 / 构建号见 [`docs/CHANGELOG-20261106.md`](docs/CHANGELOG-20261106.md)。
+> **2026-11-06**：8T 从 ColorOS 14 刷到 LineageOS 24（Android 17），系统 WebView 升到 156 —— P1.3 的版本卡点消失，App 内直连回环可用。当天从 v0.9.2 一路做到 v1.1.1：修完 WebView 渲染与交互（0.9.x → 1.0.1），再把 payload 从 dsh 0.1.5-rc.1 升到 0.2.1-rc.2、打通「登录 DeepSeek 账号」（1.1.x）。逐版本的问题 / 根因 / 修法 / 构建号见 [`docs/CHANGELOG-20261106.md`](docs/CHANGELOG-20261106.md)。
 
 ```
 App 启动 → LaunchedEffect → EngineService(前台服务)
@@ -200,24 +200,31 @@ minTargetSdkVersion=26 → domain=untrusted_app_27   levelFrom=user
 | P9 | 记忆系统第 2–4 步（L0 一页纸 / 三个原生工具 / 后台巩固） | 📝 设计完成，第 3 步等一周观测后决定 |
 | P10 | 主动性（定时 / 目标 / 技能） | 待办 |
 
-### 当前实机状态（2026-11-06 05:00 实测）
+### 当前实机状态（2026-11-06 06:15 实测）
 
 ```
 设备       OnePlus 8T KB2000 / LineageOS 24.0-20261030-NIGHTLY-kebab / Android 17
-App        cc.bestly.dsh  v0.9.9  versionCode 23  uid 10179  targetSdk 28
+App        cc.bestly.dsh  v1.1.1  versionCode 27  uid 10180  targetSdk 28
 引擎       0.0.0.0:13081（iptables 只放行 lo / tun1，其余 DROP）
-payload    v1.14.0；三处 Android 补丁已打（host 限制 / koffi stub / ABI size）
+payload    dsh 0.2.1-rc.2（566M / 31,021 文件）；四处 Android 补丁已打
+           （host 封锁×2 / koffi stub / restructure）
 双地址     127.0.0.1:13081（App 内 / 本机浏览器）
            100.102.144.35:13081（Tailscale，其他设备）
 界面       状态卡可折叠 · 主题三态 · 日志 token 全打码（状态卡 TOKEN 保留明文供复制）
+           WebView 支持 window.open：登录页作为覆盖层显示，主窗口不再变 about:blank
+登录       弹窗有「登录 DeepSeek 账号」+「添加 API Key」两条路
+           登录走 platform.deepseek.com 手机号 + 验证码，OAuth 回调回 127.0.0.1
 看护       service.d 四个开机脚本：adb-tcp / tailscale-start / tailscale-watchdog / dsh-firewall
 旧壳       com.deepseek.harness 已退役；数据仍在 2026-11-05 全量备份里，未迁入本机
-记忆       zero-eight 月记 53 行 / 12,025 字节（基线）
 冻结       已解决（ColorOS 三开关按 App 生效，新壳已开）
 ```
 
-**唯一遗留**：内置 WebView 需 Chrome 119+（系统 WebView 停在 117），
-App 内 UI 不可用；日常走 Tailscale 浏览器或 TG 群，引擎本身不受影响。
+**webview 注意事项**（都是实测踩出来的，改这块之前先看）：
+- `100vh` 在 WebView 里恒为 0（页面全 `position: fixed`，`html` 高度是 0），
+  靠 `onPageFinished` 遍历全部样式表就地换算成 px，**每条规则必须独立 try/catch**
+- `prefers-color-scheme` 跟的是 Activity window theme，不是 Compose `darkColorScheme()`
+- `window.open` 必须让新窗口真存在（`addView` 到 FrameLayout），塞回主 WebView 会被
+  `about:blank` 占位导航覆盖
 
 ## 更新纪律（456 定的规矩，2026-10-30）
 
