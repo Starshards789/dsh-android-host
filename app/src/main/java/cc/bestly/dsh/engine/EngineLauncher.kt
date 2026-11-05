@@ -393,6 +393,9 @@ object EngineLauncher {
 
                             _state.value = EngineState.Running(pid, p, token, bindHost)
                             appendLog("=== 就绪: port=$p probe=$code ===")
+                            // 引擎刚把自己的访问 URL（带 token）写进 engine.log ——
+                            // start() 开头那次清的是上一轮的，这次才清得到本轮。
+                            sanitizeRuntimeLogs(ctx)
                         }
                     }
                 }
