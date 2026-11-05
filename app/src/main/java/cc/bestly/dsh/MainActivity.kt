@@ -396,8 +396,17 @@ private fun EngineWebView(port: Int, token: String, onBack: () -> Unit) {
                         domStorageEnabled = true      // dsh web 依赖 localStorage
                         databaseEnabled = true
                         cacheMode = WebSettings.LOAD_DEFAULT
-                        useWideViewPort = true
-                        loadWithOverviewMode = true
+                        // 千万不要开 useWideViewPort / loadWithOverviewMode。
+                        // 实测（LineageOS 24 / WebView 156）这组设置会让 WebView 里
+                        // 100vh / 100dvh / 100svh 全部算成 0，而 window.innerHeight 却是正常的 721。
+                        // dsh 的弹窗用 max-height: calc(-48px + 100vh) 控制高度，
+                        // 于是变成 calc(-48px + 0) = -48px 这个非法值，弹窗高度塌成 48px，
+                        // 标题 / 说明 / 按钮全被 overflow:hidden 裁掉，画面上只剩一个输入框。
+                        // 页面自带 <meta name="viewport" content="width=device-width, initial-scale=1">，
+                        // 用 WebView 默认设置就能正确适配，不需要这两个开关。
+                        setSupportZoom(false)
+                        builtInZoomControls = false
+                        displayZoomControls = false
                     }
                     webViewClient = WebViewClient()
                     loadUrl("http://127.0.0.1:$port/?token=$token")
