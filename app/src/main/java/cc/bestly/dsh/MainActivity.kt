@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.os.Message
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -45,6 +46,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cc.bestly.dsh.engine.EngineLauncher
 import cc.bestly.dsh.engine.EngineState
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -489,8 +492,75 @@ private fun EngineWebView(port: Int, token: String, onBack: () -> Unit) {
                         setSupportZoom(false)
                         builtInZoomControls = false
                         displayZoomControls = false
+                        // dsh 0.2.x 的「登录 DeepSeek 账号」用 window.open 开新窗口，
+                        // target=_blank 的链接也一样。不开这个开关，WebView 会把当前页
+                        // 直接导航成 about:blank —— 实测点登录后整页白屏就是这么来的。
+                        setSupportMultipleWindows(true)
+                        javaScriptCanOpenWindowsAutomatically = true
+                    }
+                    webChromeClient = object : WebChromeClient() {
+                        /**
+                         * 接住 window.open / target=_blank。
+                         *
+                         * 做法不是真开第二个窗口，而是在当前 WebView 里加载新窗口要打开的
+                         * URL：套壳只有一个可视区域，多开一个 WebView 反而要额外管生命周期
+                         * 和触摸归属（之前就栽在 WebView 泄漏吞触摸上）。
+                         *
+                         * 登录流程本身是 URL 跳转 -> DeepSeek 授权页 -> 回调 127.0.0.1:13081，
+                         * 回到本机地址时当前 WebView 自然恢复成 dsh 页面，所以单窗口够用。
+                         */
+                        override fun onCreateWindow(
+                            view: WebView,
+                            isDialog: Boolean,
+                            isUserGesture: Boolean,
+                            resultMsg: Message
+                        ): Boolean {
+                            val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+                            val popup = WebView(view.context)
+                            popup.webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(
+                                    v: WebView,
+                                    request: WebResourceRequest
+                                ): Boolean {
+                                    takeOver(request.url.toString())
+                                    return true
+                                }
+
+                                override fun onPageStarted(v: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                                    // 兜底：有些 window.open 不走 shouldOverrideUrlLoading
+                                    if (!url.isNullOrBlank() && !url.startsWith("about:")) takeOver(url)
+                                }
+
+                                private fun takeOver(target: String) {
+                                    view.post {
+                                        if (target.startsWith("about:")) return@post
+                                        view.loadUrl(target)
+                                    }
+                                }
+                            }
+                            transport.webView = popup
+                            resultMsg.sendToTarget()
+                            return true
+                        }
                     }
                     webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView,
+                            request: WebResourceRequest
+                        ): Boolean {
+                            // 非 http(s) 的 scheme（weixin://、mailto: 之类）WebView 处理不了，
+                            // 丢给系统；其余一律让 WebView 自己加载。
+                            val scheme = request.url.scheme ?: return false
+                            if (scheme != "http" && scheme != "https") {
+                                try {
+                                    view.context.startActivity(Intent(Intent.ACTION_VIEW, request.url))
+                                } catch (_: Exception) {
+                                }
+                                return true
+                            }
+                            return false
+                        }
+
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             // WebView 里 100vh / 100dvh / 100svh 恒为 0（innerHeight 却是正常的，

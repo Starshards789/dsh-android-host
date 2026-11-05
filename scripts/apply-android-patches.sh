@@ -79,7 +79,10 @@ if [ "$(run_root "[ -f $STARTUP ] && echo yes")" = "yes" ]; then
     if [ "$DRY_RUN" = 1 ]; then
       say "   [dry] 注释掉 options.host === 0.0.0.0 那一行"
     else
+      # v1.14.0 写法：拦死 0.0.0.0
       run_root "sed -i s|^\\\\(.*options\\\\.host.*0\\\\.0\\\\.0\\\\.0.*\\\\)\\$|// [patch-android] \\\\1| $STARTUP"
+      # v1.20.1+ 写法：isWildcardHost(options.host) —— 仍拦 0.0.0.0，但放行了具体 IP
+      run_root "sed -i s|^\\\\(.*isWildcardHost(options\\\\.host).*\\\\)\\$|// [patch-android] \\\\1| $STARTUP"
       fix_meta "$STARTUP"
       if [ "$(run_root "grep -q patch-android $STARTUP && echo patched")" = "patched" ]; then
         say "   OK"
