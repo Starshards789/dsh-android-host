@@ -197,14 +197,18 @@ minTargetSdkVersion=26 → domain=untrusted_app_27   levelFrom=user
 | **P7** | **引擎自愈重写（v0.8.1→v0.8.4）+ 三层看护** | **✅ 完成（2026-10-30 真机验收）** |
 | **P7.5** | **记忆系统第 0、1 步（引擎自愈 + 收尾三问触发器）** | **✅ 完成（2026-10-30，见 `docs/memory-trigger.md`）** |
 | **P8** | **零八从旧壳迁到新壳 + 旧壳退役** | **✅ 完成（2026-10-30 21:20 验收，见 `docs/migration-cutover.md`）** |
+| **P11** | **无障碍读屏桥（DshA11yService + 本地 HTTP 3181）** | **✅ 完成（v1.3.2，零八实测 3/3，见 `docs/a11y-bridge.md`）** |
 | P9 | 记忆系统第 2–4 步（L0 一页纸 / 三个原生工具 / 后台巩固） | 📝 设计完成，第 3 步等一周观测后决定 |
 | P10 | 主动性（定时 / 目标 / 技能） | 待办 |
 
-### 当前实机状态（2026-11-06 06:15 实测）
+### 当前实机状态（2026-11-06 22:55 实测）
 
 ```
 设备       OnePlus 8T KB2000 / LineageOS 24.0-20261030-NIGHTLY-kebab / Android 17
-App        cc.bestly.dsh  v1.1.1  versionCode 27  uid 10180  targetSdk 28
+App        cc.bestly.dsh  v1.3.2  versionCode 33  uid 10180  targetSdk 28
+无障碍     DshA11yService 已启用并绑定（capabilities=33）
+           本地桥 127.0.0.1:3181，X-DSH-Token 鉴权；引擎 environ 已确认注入
+           读屏 / 点按 / 输入 / 滚动 / 截图可用；多点触控（/touch /gesture）未实现
 引擎       0.0.0.0:13081（iptables 只放行 lo / tun1，其余 DROP）
 payload    dsh 0.2.1-rc.2（566M / 31,021 文件）；四处 Android 补丁已打
            （host 封锁×2 / koffi stub / restructure）
@@ -279,6 +283,7 @@ docs/                   设计与实测记录（见下方索引）
 | [`docs/engine-freeze.md`](docs/engine-freeze.md) | ColorOS 冻结机制与 33 次冻结的原始记录 |
 | [`docs/engine-selfheal.md`](docs/engine-selfheal.md) | v0.8.1→v0.8.4 四个 bug 与 generation 代号修法 |
 | [`docs/external-watchdog.md`](docs/external-watchdog.md) | 三层看护设计 + host-guard-v2 的六个坑 |
+| [`docs/a11y-bridge.md`](docs/a11y-bridge.md) | 无障碍读屏桥：三层结构、端点契约、三个伪装成别的问题的坑、零八验收与已知边界 |
 | [`docs/trust.md`](docs/trust.md) | 升级闸门的信任根（Ed25519） |
 
 **记忆系统**
