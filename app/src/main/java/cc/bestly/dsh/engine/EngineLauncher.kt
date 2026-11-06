@@ -2,6 +2,7 @@ package cc.bestly.dsh.engine
 
 import android.content.Context
 import android.util.Log
+import cc.bestly.dsh.a11y.A11yHttpServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -333,6 +334,13 @@ object EngineLauncher {
             put("TMPDIR", tmpDir.absolutePath)
             put("OPENSSL_CONF", "${payload}/runtime/etc/openssl.cnf")
             put("SSL_CERT_FILE", "${payload}/runtime/etc/cacert.pem")
+
+            // 无障碍 HTTP 桥的坐标。插件（引擎进程）靠这两个连 App 侧的
+            // A11yHttpServer：端口决定去哪找，令牌决定能不能进。
+            // ★ 令牌必须和 App 侧是同一个值 —— A11yHttpServer.token() 内部
+            //   读写同一个 SharedPreferences，所以两边取到的一定一样。
+            put("APP_A11Y_PORT", A11yHttpServer.PORT.toString())
+            put("APP_LOCAL_TOKEN", A11yHttpServer.token(ctx))
             put("DSH_HOME", dshHome.absolutePath)
             put("HOME", ctx.filesDir.absolutePath)
 

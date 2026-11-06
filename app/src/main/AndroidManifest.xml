@@ -79,6 +79,28 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!--
+          无障碍服务：给 AI 读屏 + 按文字点击。
+
+          ★ exported 必须 true：绑定方是系统（Settings/SystemServer），不是本应用。
+          ★ permission 必须是 BIND_ACCESSIBILITY_SERVICE：缺了这个，服务不会出现在
+            「设置 → 无障碍」列表里，用户根本没法开。
+          ★ 服务名（label）或配置一旦改动，用户端已开的授权会失效，要重新开一次 ——
+            这是 Android 的行为，不是 bug。
+        -->
+        <service
+            android:name=".a11y.DshA11yService"
+            android:exported="true"
+            android:label="@string/a11y_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
     </application>
 
 </manifest>

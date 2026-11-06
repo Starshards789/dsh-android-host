@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  无障碍服务配置。
+
+  ★ canRetrieveWindowContent 必须 true：这是「能读控件树」的总开关，
+    关掉就只能收到事件、读不到节点。
+  ★ canPerformGestures 必须 true：tap/swipe/scroll 走的是 dispatchGesture，
+    没有这个标志调手势会被系统静默丢弃（不报错，只是没反应）。
+  ★ flagReportViewIds：让节点带上 viewIdResourceName，插件排查「找不到控件」
+    时能按 id 定位，不用靠文字猜。
+  ★ eventTypes 只订阅窗口变化：订阅 TYPE_WINDOW_CONTENT_CHANGED 会让
+    每个滚动帧都回调一次，无障碍线程会被打满，反而变慢。
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/a11y_service_desc"
+    android:notificationTimeout="100" />

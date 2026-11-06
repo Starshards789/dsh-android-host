@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">dsh host</string>
+
+    <!--
+      无障碍服务名。必须是这个名字 —— dsh-tool-accessibility 插件的引导文案
+      里写死了「DeepSeek Harness 屏幕助手」，用户在系统设置里要按这个名字找。
+      改这里就要同步改插件文案，否则用户按提示找不到服务。
+    -->
+    <string name="a11y_service_label">DeepSeek Harness 屏幕助手</string>
+    <string name="a11y_service_desc">让 AI 读取屏幕上的按钮和文字、按文字点击、填写输入框。不开启时 AI 只能看到截图，看不到界面结构。</string>
+
 </resources>

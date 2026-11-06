@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import cc.bestly.dsh.a11y.A11yHttpServer
 import cc.bestly.dsh.engine.EngineLauncher
 import cc.bestly.dsh.engine.EngineState
 import kotlinx.coroutines.CoroutineScope
@@ -69,6 +70,12 @@ class EngineService : Service() {
         super.onCreate()
         startForeground(NOTIF_ID, buildNotification("引擎启动中…"))
         hostLog("--- EngineService.onCreate ---")
+
+        // 无障碍 HTTP 桥（127.0.0.1:3181）。
+        // 放在引擎之前启动：引擎起来后插件立刻就要连 3181，晚启动会有几秒的
+        // 「App 本地服务不可用」窗口。无障碍服务本身没开也不影响启动 ——
+        // 插件会拿到「无障碍服务未连接」，引导用户去设置里开，比端口拒绝更好定位。
+        A11yHttpServer.start(this)
 
         EngineLauncher.start(this, scope)
 
