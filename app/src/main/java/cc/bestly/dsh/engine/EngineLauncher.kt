@@ -324,7 +324,11 @@ object EngineLauncher {
         }
 
         pb.environment().apply {
-            put("PATH", "${payload}/bin:${payload}/runtime/bin:/system/bin")
+            // ★ 2026-11-06：PATH 必须包含 /product/bin。
+            //   Magisk 的 su 是 /product/bin/su -> ./magisk，而 tool-android 用
+            //   spawn("su", ...) 依赖 PATH 查找（不是绝对路径）。少了这一段，
+            //   ROOT_AVAILABLE=1 但 su 永远 rc=127，AI 会如实报告「root 不可用」。
+            put("PATH", "${payload}/bin:${payload}/runtime/bin:/system/bin:/product/bin:/system/xbin")
             put("LD_LIBRARY_PATH", "${payload}/runtime/lib")
             put("TMPDIR", tmpDir.absolutePath)
             put("OPENSSL_CONF", "${payload}/runtime/etc/openssl.cnf")
@@ -342,9 +346,19 @@ object EngineLauncher {
             // 所以这里必须如实告知 —— 用二进制存在性探测，不真跑 su（省启动时间）。
             if (hasRootChannel()) put("ROOT_AVAILABLE", "1")
 
-            // AI 的文件/shell 操作根目录：App 私有 workspace。
-            // 不设则回退引擎进程目录（= payload），在 payload 里写东西会污染内核树。
-            val workspace = File(ctx.filesDir, "workspace").apply { mkdirs() }
+            // AI 的文件/shell 操作根目录。
+            // ★ 2026-11-06：优先用共享存储的 DSH-Workspace，而不是 App 私有 files/workspace。
+            //   原因：工作区在 dsh 里注册的是 /storage/emulated/0/DSH-Workspace，
+            //   用户在文件管理器里看到的也是它。如果这里是私有目录，AI 的 bash-local
+            //   默认 cwd 就跟用户眼里的「我的工作区」不是同一个地方 ——
+            //   AI 会说「工作区里搜不到」，其实是站在一个空目录里。
+            //   回退顺序：共享工作区存在 → 用它；否则退回私有目录（保证总有可写位置）。
+            val sharedWorkspace = File("/storage/emulated/0/DSH-Workspace")
+            val workspace = if (sharedWorkspace.isDirectory) {
+                sharedWorkspace
+            } else {
+                File(ctx.filesDir, "workspace").apply { mkdirs() }
+            }
             put("DSH_WORKSPACE", workspace.absolutePath)
             // 日志脱敏：绝不把密钥类变量透给子进程
             keys.filter { k ->
