@@ -52,15 +52,20 @@ object ScreenshotUtil {
             // 读图片真实尺寸（只读头，不解码全图）。
             val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
             android.graphics.BitmapFactory.decodeFile(out.absolutePath, opts)
+            // ★ screenW/H 必须与节点 bounds 用同一坐标系（物理像素）。
+            //   Resources.displayMetrics 的 heightPixels 是「应用可用高度」
+            //   （实测 1080x2209），比物理屏 1080x2400 少掉状态栏与导航栏；
+            //   拿它当屏幕高度会让插件算出 scaleY=0.92，截图上量到的 Y
+            //   坐标被系统性压掉 8%，越往下点越偏。screencap 输出的就是
+            //   物理分辨率，所以直接用图片尺寸最自洽（scaleX/Y 恒为 1）。
             val imgW = opts.outWidth
             val imgH = opts.outHeight
 
-            val dm = android.content.res.Resources.getSystem().displayMetrics
             JSONObject()
                 .put("ok", true)
                 .put("path", out.absolutePath)
-                .put("screenW", dm.widthPixels)
-                .put("screenH", dm.heightPixels)
+                .put("screenW", imgW)
+                .put("screenH", imgH)
                 .put("imageW", imgW)
                 .put("imageH", imgH)
                 .toString()

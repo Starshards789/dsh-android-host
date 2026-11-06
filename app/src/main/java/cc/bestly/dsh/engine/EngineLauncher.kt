@@ -325,6 +325,16 @@ object EngineLauncher {
         }
 
         pb.environment().apply {
+            // ★ 顺序铁律：先剥掉「继承来的」密钥类变量，再写本应用要注入的变量。
+            //   反过来的话，下面这段过滤会把刚 put 的 APP_LOCAL_TOKEN 一起删掉
+            //   （键名含 TOKEN）——实测后果是 /proc/<pid>/environ 里只剩
+            //   APP_A11Y_PORT，插件永远拿不到鉴权头、每次调用都「鉴权失败」，
+            //   而 App 侧 HTTP 桥看起来一切正常，极难定位。
+            keys.filter { k ->
+                k.contains("KEY", true) || k.contains("SECRET", true) ||
+                    k.contains("TOKEN", true) || k.contains("PASSWORD", true)
+            }.toList().forEach { remove(it) }
+
             // ★ 2026-11-06：PATH 必须包含 /product/bin。
             //   Magisk 的 su 是 /product/bin/su -> ./magisk，而 tool-android 用
             //   spawn("su", ...) 依赖 PATH 查找（不是绝对路径）。少了这一段，
@@ -368,11 +378,6 @@ object EngineLauncher {
                 File(ctx.filesDir, "workspace").apply { mkdirs() }
             }
             put("DSH_WORKSPACE", workspace.absolutePath)
-            // 日志脱敏：绝不把密钥类变量透给子进程
-            keys.filter { k ->
-                k.contains("KEY", true) || k.contains("SECRET", true) ||
-                    k.contains("TOKEN", true) || k.contains("PASSWORD", true)
-            }.forEach { remove(it) }
         }
 
         val proc = pb.start()
