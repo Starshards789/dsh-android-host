@@ -308,7 +308,7 @@ viking://user/zero-eight/memories/
 | 内容 | 来源 |
 |---|---|
 | 压缩参数、事件机制 | 设备上 `@deepseek-ai/dsh-compaction-basic`、`dsh-session`、`dsh-session-persistence-jsonl` 的 README.zh.md 与源码 |
-| 业界横评 | `docs/memory-research/industry-survey.md`（MemGPT/Letta、Mem0、Zep、A-MEM、Cognee，一手来源逐条核对） |
-| 可移植实现 | `docs/memory-research/portable-implementations.md`（MemOS / opencode-mem / claude-mem 源码级） |
+| 业界横评 | `docs/research/industry-survey.md`（MemGPT/Letta、Mem0、Zep、A-MEM、Cognee，一手来源逐条核对） |
+| 可移植实现 | `docs/research/portable-implementations.md`（MemOS / opencode-mem / claude-mem 源码级） |
 | SQLite 实测 | 在 8T（Node v26.4.0）上跑的探针，见第 5 节 |
-| 零八的意见 | `docs/correspondence/20261030-memory-discussion.md` |
+| 零八的意见 | `docs/history/correspondence/20261030-memory-discussion.md` |

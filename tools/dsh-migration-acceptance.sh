@@ -106,5 +106,5 @@ elif [ "$NEW" != "401" ] || [ "$MW" -lt 1 ] || [ "$RELAY" != "active" ]; then
   echo "  ⚠️ 新壳有健康问题 —— 先修，别删旧壳（旧壳还是退路）"
 else
   echo "  ⚠️ 记忆没长够 —— 先解决记忆触发器，别急着删旧壳"
-  echo "     按 docs/memory-design.md 的 B → C → D 方案升级"
+  echo "     按 docs/design/memory-design.md 的 B → C → D 方案升级"
 fi

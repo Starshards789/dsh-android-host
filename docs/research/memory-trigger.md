@@ -49,7 +49,7 @@
 
 ## ★ 关键防护：备份绝不能留在 dshhome
 
-`docs/engine-freeze.md` 记过一个雷：chokidar 启动时监视 `dshhome`，
+`docs/ops/engine-freeze.md` 记过一个雷：chokidar 启动时监视 `dshhome`，
 遇到非 app 属主的文件会 `EACCES` → **整个引擎进程崩溃**。
 
 所以备份必须放 `/data/local/tmp/`，改完必须 `chown u0_a284:u0_a284`，
@@ -72,7 +72,7 @@
 | 新增条目的类型 | 以「坑/排障路径」「项目状态」为主，不是流水账 |
 | 检索能否召回 | 用直读核实（**绝不用检索结果倒推文件是否为空**） |
 
-**验收时只认直读**——`docs/memory-design.md` 第 10 节记着零一的教训：
+**验收时只认直读**——`docs/design/memory-design.md` 第 10 节记着零一的教训：
 用检索搜不到就断言「37 天没写过记忆」，实际文件 45 行 / 11,841 字节。
 
 ---

@@ -1,6 +1,6 @@
 # 外部看护：host-guard v2（2026-10-30）
 
-> 这是 `docs/engine-selfheal.md` 的续篇：App 内部自愈做完之后，补上**外部力量**。
+> 这是 `docs/ops/engine-selfheal.md` 的续篇：App 内部自愈做完之后，补上**外部力量**。
 > 因为 App 被 ColorOS 冻住时，它自己什么都做不了（正在挂起），必须有外部的人救它。
 
 ---

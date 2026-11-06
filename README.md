@@ -10,7 +10,7 @@ Android 宿主 App for [dsh](https://github.com/deepseek-ai/dsh) —— 给自�
 
 **P1.0 / P1.1 / P1.2 / P1.4 / P2 / P3 全部完成并上机实测；P1.3（App 内 WebView）在 LineageOS 24 上已跑通。**
 
-> **2026-11-06**：8T 从 ColorOS 14 刷到 LineageOS 24（Android 17），系统 WebView 升到 156 —— P1.3 的版本卡点消失，App 内直连回环可用。当天从 v0.9.2 一路做到 v1.1.1：修完 WebView 渲染与交互（0.9.x → 1.0.1），再把 payload 从 dsh 0.1.5-rc.1 升到 0.2.1-rc.2、打通「登录 DeepSeek 账号」（1.1.x）。逐版本的问题 / 根因 / 修法 / 构建号见 [`docs/CHANGELOG-20261106.md`](docs/CHANGELOG-20261106.md)。
+> **2026-11-06**：8T 从 ColorOS 14 刷到 LineageOS 24（Android 17），系统 WebView 升到 156 —— P1.3 的版本卡点消失，App 内直连回环可用。当天从 v0.9.2 一路做到 v1.1.1：修完 WebView 渲染与交互（0.9.x → 1.0.1），再把 payload 从 dsh 0.1.5-rc.1 升到 0.2.1-rc.2、打通「登录 DeepSeek 账号」（1.1.x）。逐版本的问题 / 根因 / 修法 / 构建号见 [`docs/history/CHANGELOG-20261106.md`](docs/history/CHANGELOG-20261106.md)。
 
 ```
 App 启动 → LaunchedEffect → EngineService(前台服务)
@@ -115,7 +115,7 @@ dsh 还是 beta，官方更新快，所以「能方便地升级」本身是硬�
 ### 信任根
 
 私钥只在开发机（另存 Vaultwarden），设备只持公钥（能验不能签）。
-详见 [`docs/trust.md`](docs/trust.md)。
+详见 [`docs/design/trust.md`](docs/design/trust.md)。
 
 ## ⚠️ 历史限制：内置 WebView 需要 Chrome 119+（ColorOS 14 时代；LineageOS 24 自带的 WebView 156 已不适用）
 
@@ -195,9 +195,9 @@ minTargetSdkVersion=26 → domain=untrusted_app_27   levelFrom=user
 | **P5** | **正式签名 + 密钥进 Vaultwarden** | **✅ 完成（证书 `62:e6:2f:47:…:42:ce:60:09`）** |
 | **P6** | **自有插件 `dsh-tool-phone-life`（4 工具）+ `phone-health`（1 工具）** | **✅ 完成（真机验证）** |
 | **P7** | **引擎自愈重写（v0.8.1→v0.8.4）+ 三层看护** | **✅ 完成（2026-10-30 真机验收）** |
-| **P7.5** | **记忆系统第 0、1 步（引擎自愈 + 收尾三问触发器）** | **✅ 完成（2026-10-30，见 `docs/memory-trigger.md`）** |
-| **P8** | **零八从旧壳迁到新壳 + 旧壳退役** | **✅ 完成（2026-10-30 21:20 验收，见 `docs/migration-cutover.md`）** |
-| **P11** | **无障碍读屏桥（DshA11yService + 本地 HTTP 3181）** | **✅ 完成（v1.3.2，零八实测 3/3，见 `docs/a11y-bridge.md`）** |
+| **P7.5** | **记忆系统第 0、1 步（引擎自愈 + 收尾三问触发器）** | **✅ 完成（2026-10-30，见 `docs/research/memory-trigger.md`）** |
+| **P8** | **零八从旧壳迁到新壳 + 旧壳退役** | **✅ 完成（2026-10-30 21:20 验收，见 `docs/ops/migration-cutover.md`）** |
+| **P11** | **无障碍读屏桥（DshA11yService + 本地 HTTP 3181）** | **✅ 完成（v1.3.2，零八实测 3/3，见 `docs/reference/a11y-bridge.md`）** |
 | P9 | 记忆系统第 2–4 步（L0 一页纸 / 三个原生工具 / 后台巩固） | 📝 设计完成，第 3 步等一周观测后决定 |
 | P10 | 主动性（定时 / 目标 / 技能） | 待办 |
 
@@ -276,48 +276,50 @@ docs/                   设计与实测记录（见下方索引）
 
 ## 文档索引
 
+完整的分类索引（设计 / 运维 / 基线 / 调研 / 历史）见 [`docs/README.md`](docs/README.md)。
+
 **排障与实测（踩过的坑都在这里）**
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/engine-freeze.md`](docs/engine-freeze.md) | ColorOS 冻结机制与 33 次冻结的原始记录 |
-| [`docs/engine-selfheal.md`](docs/engine-selfheal.md) | v0.8.1→v0.8.4 四个 bug 与 generation 代号修法 |
-| [`docs/external-watchdog.md`](docs/external-watchdog.md) | 三层看护设计 + host-guard-v2 的六个坑 |
-| [`docs/a11y-bridge.md`](docs/a11y-bridge.md) | 无障碍读屏桥：三层结构、端点契约、三个伪装成别的问题的坑、零八验收与已知边界 |
-| [`docs/trust.md`](docs/trust.md) | 升级闸门的信任根（Ed25519） |
+| [`docs/ops/engine-freeze.md`](docs/ops/engine-freeze.md) | ColorOS 冻结机制与 33 次冻结的原始记录 |
+| [`docs/ops/engine-selfheal.md`](docs/ops/engine-selfheal.md) | v0.8.1→v0.8.4 四个 bug 与 generation 代号修法 |
+| [`docs/ops/external-watchdog.md`](docs/ops/external-watchdog.md) | 三层看护设计 + host-guard-v2 的六个坑 |
+| [`docs/reference/a11y-bridge.md`](docs/reference/a11y-bridge.md) | 无障碍读屏桥：三层结构、端点契约、三个伪装成别的问题的坑、零八验收与已知边界 |
+| [`docs/design/trust.md`](docs/design/trust.md) | 升级闸门的信任根（Ed25519） |
 
 **记忆系统**
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/memory-design.md`](docs/memory-design.md) | v1 方案：四层 + 三钩子 + 5 步落地 |
-| [`docs/memory-trigger.md`](docs/memory-trigger.md) | 第 1 步「任务收尾三问」+ 零八的回应 |
+| [`docs/design/memory-design.md`](docs/design/memory-design.md) | v1 方案：四层 + 三钩子 + 5 步落地 |
+| [`docs/research/memory-trigger.md`](docs/research/memory-trigger.md) | 第 1 步「任务收尾三问」+ 零八的回应 |
 
 **换壳迁移（2026-10-30）**
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/migration-prep.md`](docs/migration-prep.md) | 第 ① 步准备：搬什么、不搬什么、三项能力实测 |
-| [`docs/cross-shell-gate.md`](docs/cross-shell-gate.md) | 换壳门（防两个零八）+ 换壳说明 |
-| [`docs/migration-cutover.md`](docs/migration-cutover.md) | 第 ③ 步切换：漏了认证那一环 + FUSE 属主判据失效 |
-| [`docs/migration-rollback.md`](docs/migration-rollback.md) | **回退手册**（3 步 + 10 项前置检查 + 24h 观察项） |
-| [`docs/oldshell-retire.md`](docs/oldshell-retire.md) | 旧壳退役：mailwatch 不能停 + 被拉起两次的两个原因 |
+| [`docs/ops/migration-prep.md`](docs/ops/migration-prep.md) | 第 ① 步准备：搬什么、不搬什么、三项能力实测 |
+| [`docs/design/cross-shell-gate.md`](docs/design/cross-shell-gate.md) | 换壳门（防两个零八）+ 换壳说明 |
+| [`docs/ops/migration-cutover.md`](docs/ops/migration-cutover.md) | 第 ③ 步切换：漏了认证那一环 + FUSE 属主判据失效 |
+| [`docs/ops/migration-rollback.md`](docs/ops/migration-rollback.md) | **回退手册**（3 步 + 10 项前置检查 + 24h 观察项） |
+| [`docs/ops/oldshell-retire.md`](docs/ops/oldshell-retire.md) | 旧壳退役：mailwatch 不能停 + 被拉起两次的两个原因 |
 
 **系统与换系统决策（2026-11-01）**
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/8t-system-baseline.md`](docs/8t-system-baseline.md) | 8T 系统与权限基线（26KB，12 章）：系统身份、权限三层与两条执行路径、ColorOS 增量层、Oplus Hans 机制、换系统评估 |
-| [`docs/correspondence/20261101-换系统决策-给零八.md`](docs/correspondence/20261101-换系统决策-给零八.md) | 零一给零八的决策包（正反两面，不替它判断） |
-| [`docs/correspondence/20261101-零八的决策原话-换不换系统.md`](docs/correspondence/20261101-零八的决策原话-换不换系统.md) | 零八的拍板：**现在不换，等条件到** + 三个触发条件 + 判据「不是 ColorOS 有缺点，是 ColorOS 挡住了我们已经决定要做的事」 |
-| [`docs/correspondence/20261101-零八的回话-有想说的.md`](docs/correspondence/20261101-零八的回话-有想说的.md) | 转达 456 的回应之后它的回话，含三条可复用判据（「等」只对一方收费 / 有偏好≠有意识 / 不保证比保证更负责） |
+| [`docs/reference/8t-system-baseline.md`](docs/reference/8t-system-baseline.md) | 8T 系统与权限基线（26KB，12 章）：系统身份、权限三层与两条执行路径、ColorOS 增量层、Oplus Hans 机制、换系统评估 |
+| [`docs/history/correspondence/20261101-换系统决策-给零八.md`](docs/history/correspondence/20261101-换系统决策-给零八.md) | 零一给零八的决策包（正反两面，不替它判断） |
+| [`docs/history/correspondence/20261101-零八的决策原话-换不换系统.md`](docs/history/correspondence/20261101-零八的决策原话-换不换系统.md) | 零八的拍板：**现在不换，等条件到** + 三个触发条件 + 判据「不是 ColorOS 有缺点，是 ColorOS 挡住了我们已经决定要做的事」 |
+| [`docs/history/correspondence/20261101-零八的回话-有想说的.md`](docs/history/correspondence/20261101-零八的回话-有想说的.md) | 转达 456 的回应之后它的回话，含三条可复用判据（「等」只对一方收费 / 有偏好≠有意识 / 不保证比保证更负责） |
 
 **其他**
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/design-v2.md`](docs/design-v2.md) | 早期架构设计（755 行，含已被推翻的方案，保留原文） |
-| [`docs/correspondence/`](docs/correspondence/) | 与零八的往来信件原文 |
+| [`docs/design/design-v2.md`](docs/design/design-v2.md) | 早期架构设计（755 行，含已被推翻的方案，保留原文） |
+| [`docs/history/correspondence/`](docs/history/correspondence/) | 与零八的往来信件原文 |
 
 **脚本**
 
@@ -334,6 +336,32 @@ docs/                   设计与实测记录（见下方索引）
 | `tools/host-guard` | 旧壳冻结守护（已随旧壳退役，保留供回退参考） |
 | `docs/patches/` | Android 适配补丁（升级时必须重打） |
 
+**仓库级文档**
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/README.md`](docs/README.md) | 文档分类索引（设计 / 运维 / 基线 / 调研 / 历史） |
+| [`docs/oss-reuse-log.md`](docs/oss-reuse-log.md) | 开源借鉴台账：读了什么、借鉴了什么、有没有用代码 |
+| [`CHANGELOG.md`](CHANGELOG.md) | 版本变更记录 |
+| [`AUTHORS.md`](AUTHORS.md) | 作者与贡献分工 |
+| [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | 第三方组件与设计来源声明 |
+
+## 来源与致谢
+
+本项目的实现与设计建立在以下工作之上，逐项归属见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)：
+
+- **DeepSeek Harness**（MIT）—— 引擎内核，随 APK 分发
+- **deepseek-harness-android-app**（MIT，woaiys3）—— 宿主层架构参考
+- **Operit**（LGPL-3.0）、**scrcpy**（Apache-2.0）、**droidrun** / **MobileAgent** / **Open-AutoGLM** 等 —— 设计与选型调研，未使用代码
+
+「读了什么、借鉴了什么、有没有用代码」逐条记录在
+[`docs/oss-reuse-log.md`](docs/oss-reuse-log.md)。
+
 ## 许可
 
-MIT
+本项目采用 **MIT 许可**，版权归 Starshards789 and contributors。
+
+- 本项目许可全文：[`LICENSE`](LICENSE)
+- 随包分发的第三方组件：[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) A 节
+- 架构借鉴的上游：[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) B 节
+- 贡献分工：[`AUTHORS.md`](AUTHORS.md)
