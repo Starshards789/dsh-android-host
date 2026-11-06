@@ -37,6 +37,7 @@
 | [`memory-trigger.md`](research/memory-trigger.md) | 记忆第 1 步「任务收尾三问」+ 零八的回应 |
 | [`industry-survey.md`](research/industry-survey.md) | 业界 Agent 记忆系统横向调研（MemGPT/Letta、Mem0、Zep、A-MEM、Cognee） |
 | [`portable-implementations.md`](research/portable-implementations.md) | 可移植到 Node / 安卓的轻量记忆实现 |
+| [`memory-layer-verification.md`](research/memory-layer-verification.md) | 记忆层实测：OpenViking 的 git 快照/回滚/embedding 四问（2026-11-07） |
 
 ## history/ — 历史归档
 
