@@ -161,7 +161,24 @@ class DshA11yService : AccessibilityService() {
             .put("nodeCount", count)
             .put("apiLevel", Build.VERSION.SDK_INT)
             .put("selfPackage", packageName)
+            // ★ 截图能力位：截图走 root 的 screencap（ScreenshotUtil），
+            //   与无障碍 API 的 CAPABILITY 位无关。不报这一项时插件
+            //   （android_a11y_status 的 canScreenshot）恒为 false，
+            //   而 android_see 实际能出图 —— 实测零八据此以为「截图不可用」。
+            //   只查文件存在性，不执行 su（每次 status 弹 Magisk Toast 不可接受）。
+            .put("canScreenshot", hasSuBinary())
     }
+
+    /** 是否存在 su 二进制（只用路径判断，不执行）。 */
+    private fun hasSuBinary(): Boolean = listOf(
+        "/system/bin/su",
+        "/system/xbin/su",
+        "/sbin/su",
+        "/product/bin/su",          // Magisk 在 Android 10+ 的常见落点
+        "/debug_ramdisk/su",
+        "/data/adb/ksu/bin/su",
+        "/data/adb/ap/bin/su",
+    ).any { java.io.File(it).exists() }
 
     private fun countNodes(node: AccessibilityNodeInfo, limit: Int): Int {
         var n = 1
