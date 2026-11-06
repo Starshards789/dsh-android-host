@@ -138,7 +138,7 @@ class DshA11yService : AccessibilityService() {
 
             // 子节点倒序入栈，保证出栈顺序和屏幕顺序一致（左上优先）。
             for (i in node.childCount - 1 downTo 0) {
-                node.getChild(i)?.let { stack.addLast(Item(it, depth + 1)) }
+                node.getChild(i)?.let { stack.addLast(it to (depth + 1)) }
             }
         }
 
