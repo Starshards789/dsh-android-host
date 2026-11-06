@@ -332,6 +332,11 @@ object EngineLauncher {
             put("DSH_HOME", dshHome.absolutePath)
             put("HOME", ctx.filesDir.absolutePath)
 
+            // payload 有 3.1 万个文件、566MB，引擎启动时要逐个解析 52 个插件的模块图。
+            // V8 的编译缓存能把已编译的字节码缓存到磁盘，第二次启动直接读，跳过重复编译。
+            // 首次启动会建缓存（略慢），之后每次都受益。
+            put("NODE_COMPILE_CACHE", File(ctx.cacheDir, "node-compile").apply { mkdirs() }.absolutePath)
+
             // ★ 安卓能力插件（tool-android / tool-vscreen）的安全设计：
             // 拿不到特权通道就不注册任何 android_* 工具，避免 AI 反复撞墙。
             // 所以这里必须如实告知 —— 用二进制存在性探测，不真跑 su（省启动时间）。
