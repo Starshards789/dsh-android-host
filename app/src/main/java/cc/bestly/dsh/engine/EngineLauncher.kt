@@ -73,6 +73,21 @@ object EngineLauncher {
     @Volatile
     private var generation = 0
 
+    /**
+     * 并发启动闸。
+     *
+     * ★ 2026-11-08 新增。双引擎竞态的根因：
+     *   「外部 restart 信号」与「健康检查失败重启」是两条独立路径，
+     *   同一秒都调用 start()，而 _state 守卫是读-判断-写，非原子 ——
+     *   两条都读到 Idle，于是各起一个引擎。
+     *   实测（16:55:40）：host.log 同一秒出现「检测到外部重启信号」与
+     *   「健康检查失败: 进程已不在」，16:55:49 分别跑在 13081 和 13082。
+     *
+     *   端口探测本是为「13081 被别的程序占了」兜底，结果把第二份启动也兜住了 ——
+     *   它顺利找到 13082，所以两条路径都没有报错。
+     */
+    private val startGuard = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private val _state = MutableStateFlow<EngineState>(EngineState.Idle)
     val state: StateFlow<EngineState> = _state.asStateFlow()
 
@@ -227,11 +242,30 @@ object EngineLauncher {
      * EADDRINUSE，看起来像权限问题（踩过一次）。
      */
     fun start(ctx: Context, scope: CoroutineScope) {
+        if (!startGuard.compareAndSet(false, true)) {
+            Log.w(TAG, "start 并发调用被拦（已有启动在执行）")
+            appendLog("start 并发调用被拦（已有启动在执行）")
+            return
+        }
+        try {
+            startLocked(ctx, scope)
+        } finally {
+            startGuard.set(false)
+        }
+    }
+
+    /** start() 的实际实现。并发闸在 start()，这里只决定「要不要起、起哪份」。 */
+    private fun startLocked(ctx: Context, scope: CoroutineScope) {
         lastCtx = ctx
         if (_state.value is EngineState.Running || _state.value is EngineState.Starting) {
             Log.w(TAG, "already starting/running, ignore")
             return
         }
+
+        // ★ 第二层防护：状态丢了不等于引擎死了。
+        //   壳进程被系统回收后重建时 _state 回到 Idle，但引擎子进程可能还活着；
+        //   此时直接往下走会再拉一个（端口探测会把第二个塞到 13082）。
+        if (adoptExistingEngine(ctx)) return
 
         // 上一轮引擎启动时会把带 token 的 URL 打进 runtime/engine.log。
         // 新起一轮之前先扫一遍脱敏，避免历史明文越积越多。
@@ -279,6 +313,50 @@ object EngineLauncher {
                 }
             }
         }
+    }
+
+    /**
+     * 认领已经存活的本工程引擎实例。
+     *
+     * 为什么需要：`_state` 只活在壳进程内存里。壳重启或被系统回收后重建时，
+     * 引擎子进程可能是活着的孤儿 —— `startLocked` 的守卫看到的是 Idle，
+     * 会再拉一个，这就是双引擎的另一条成因。
+     *
+     * 三层判据，全过才认领：
+     *  1. `runtime/pid`、`runtime/port` 有合法值
+     *  2. `/proc/<pid>/cmdline` 含 `bin.js` —— 防 pid 被复用后认错进程
+     *  3. 端口真的应答 —— 进程在但服务僵死的不算存活，必须重起
+     */
+    private fun adoptExistingEngine(ctx: Context): Boolean {
+        val runtime = runtimeDir(ctx)
+        fun read(name: String): String = try {
+            File(runtime, name).takeIf { it.exists() }?.readText()?.trim().orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+
+        val pid = read("pid").toIntOrNull() ?: return false
+        val port = read("port").toIntOrNull() ?: return false
+        if (pid <= 0 || port <= 0) return false
+
+        val cmdline = File("/proc/$pid/cmdline")
+        if (!cmdline.exists()) return false
+        val isEngine = try {
+            cmdline.readText().contains("bin.js")
+        } catch (_: Exception) {
+            false
+        }
+        if (!isEngine) return false
+
+        // 绑 0.0.0.0 时回环同样可达；探不通就不认领，让新实例自己接管。
+        if (httpProbe("127.0.0.1", port) < 0) {
+            appendLog("runtime/pid=$pid 进程在但端口 $port 无应答，按未存活处理")
+            return false
+        }
+
+        appendLog("=== 认领已存活引擎 (pid=$pid port=$port) —— 不重复启动 ===")
+        _state.value = EngineState.Running(pid, port, read("token"), read("host").ifEmpty { "0.0.0.0" })
+        return true
     }
 
     private suspend fun doStart(ctx: Context, port: Int, bindHost: String, myGen: Int) = withContext(Dispatchers.IO) {
@@ -547,10 +625,19 @@ object EngineLauncher {
         val p = process
         process = null
         try {
-            p?.destroy()
-            if (p?.waitFor(2, java.util.concurrent.TimeUnit.SECONDS) == false) {
-                p.destroyForcibly()
-                appendLog("旧引擎 2 秒未退出，已强杀")
+            if (p != null) {
+                p.destroy()
+                if (!p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
+                    p.destroyForcibly()
+                    appendLog("旧引擎 2 秒未退出，已强杀")
+                }
+            } else {
+                // 认领来的实例没有 Process 对象，按 pid 发 TERM
+                val st = _state.value
+                if (st is EngineState.Running) {
+                    Runtime.getRuntime().exec(arrayOf("kill", "-TERM", st.pid.toString())).waitFor()
+                    appendLog("已向认领实例 pid=${st.pid} 发送 TERM")
+                }
             }
         } catch (e: Exception) {
             appendLog("杀旧引擎异常: ${e.message}")
@@ -577,8 +664,9 @@ object EngineLauncher {
     fun healthProblem(): String? {
         val st = _state.value
         if (st !is EngineState.Running) return null
-        // 进程层：Process 对象还在吗
-        if (process?.isAlive != true) {
+        // 进程层：有 Process 对象就查它；认领来的实例没有对象，退回 /proc/<pid>
+        val alive = process?.isAlive ?: File("/proc/${st.pid}").exists()
+        if (!alive) {
             return "进程已不在（状态仍为 Running）"
         }
         // 服务层：端口真的应答吗
