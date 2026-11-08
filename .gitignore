@@ -19,3 +19,7 @@ apk-out/
 dsh-trust.key
 dsh-trust/
 *.key
+
+# 记忆系统本机配置（含内网地址，绝不入库）
+scripts/memory/config.json
+memory/config.json

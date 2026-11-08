@@ -6,10 +6,12 @@
 const fs=require('fs'), path=require('path'), http=require('http');
 const KEY=fs.readFileSync('/data/adb/dsh-tools/.ovkey','utf8').trim();
 const HOME=process.env.DSH_HOME||'/data/user/0/cc.bestly.dsh/files/dshhome';
+// OpenViking 地址：环境变量 > config.json（gitignored）> 标准默认
+const CFG=(()=>{try{return JSON.parse(fs.readFileSync(path.join(HOME,'memory','config.json'),'utf8'))}catch{return{}}})();
 const LOG=path.join(HOME,'memory','revisions.jsonl');
 
 function call(p,body){return new Promise((res,rej)=>{const d=JSON.stringify(body);
- const r=http.request({host:process.env.OV_HOST||'127.0.0.1',port:parseInt(process.env.OV_PORT||'1933',10),path:p,method:'POST',
+ const r=http.request({host:process.env.OV_HOST||CFG.ov_host||'127.0.0.1',port:parseInt(process.env.OV_PORT||CFG.ov_port||'1933',10),path:p,method:'POST',
   headers:{'X-API-Key':KEY,'Content-Type':'application/json','Content-Length':Buffer.byteLength(d)}},
  x=>{let b='';x.on('data',c=>b+=c);x.on('end',()=>res(b));});r.on('error',rej);r.write(d);r.end();});}
 function append(rec){

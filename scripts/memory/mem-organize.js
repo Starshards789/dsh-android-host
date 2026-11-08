@@ -16,6 +16,8 @@ const path = require('path');
 const http = require('http');
 
 const HOME = process.env.DSH_HOME || '/data/user/0/cc.bestly.dsh/files/dshhome';
+// OpenViking 地址：环境变量 > config.json（gitignored）> 标准默认
+const CFG = (() => { try { return JSON.parse(fs.readFileSync(path.join(HOME, 'memory', 'config.json'), 'utf8')); } catch { return {}; } })();
 const CAND = path.join(HOME, 'memory', 'candidates');
 const BASE = 'viking://user/zero-eight/memories/episodic';
 const WRITE = process.argv.includes('--write');
@@ -31,7 +33,7 @@ function call(method, p, body) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : null;
     const req = http.request({
-      host: process.env.OV_HOST || '127.0.0.1', port: parseInt(process.env.OV_PORT || '1933', 10), path: p, method,
+      host: process.env.OV_HOST || CFG.ov_host || '127.0.0.1', port: parseInt(process.env.OV_PORT || CFG.ov_port || '1933', 10), path: p, method,
       headers: Object.assign(
         { 'X-API-Key': KEY, 'Content-Type': 'application/json' },
         data ? { 'Content-Length': Buffer.byteLength(data) } : {}
