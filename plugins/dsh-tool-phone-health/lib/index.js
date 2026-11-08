@@ -35,6 +35,8 @@
  *   外壳温度、以及最热 zone。
  */
 import { readFileSync, readdirSync, existsSync, statfsSync } from "node:fs";
+
+
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve as resolvePath } from "node:path";
@@ -118,18 +120,28 @@ function run(cmd, args, timeoutMs = 4000) {
     });
 }
 
+/** Magisk 的 su 在 /debug_ramdisk/su，不在 PATH。
+ *  ★ 不能用 existsSync 探测：App 身份（untrusted_app）stat magisk_file 被 SELinux 拒，
+ *    会误判为「不存在」并退回 "su"（而 su 不在 PATH）→ 整个插件报 root 不可用。
+ *  改为「先直连绝对路径，失败再退回 PATH 里的 su」。 */
+async function runRoot(cmd, timeoutMs = 4000) {
+    let r = await run("/debug_ramdisk/su", ["-c", cmd], timeoutMs);
+    if (!r.ok) r = await run("su", ["-c", cmd], timeoutMs);
+    return r;
+}
+
 /** su 是否可用（探测一次，结果缓存） */
 let _rootCache = null;
 async function hasRoot() {
     if (_rootCache !== null) return _rootCache;
-    const r = await run("su", ["-c", "id -u"]);
+    const r = await runRoot("id -u");
     _rootCache = r.ok && r.out.split("\n").some((l) => l.trim() === "0");
     return _rootCache;
 }
 
 /** 需要 root 的读取：先 su -c cat，失败返回 null */
 async function catAsRoot(path) {
-    const r = await run("su", ["-c", `cat ${path} 2>/dev/null`]);
+    const r = await runRoot(`cat ${path} 2>/dev/null`);
     if (r.ok && r.out) return r.out.split("\n")[0].trim();
     return null;
 }
@@ -305,7 +317,7 @@ function collectMemory() {
 
 /** 前台应用：需要 root（App 身份缺 android.permission.DUMP） */
 async function collectForeground() {
-    const r = await run("su", ["-c", "dumpsys activity activities 2>/dev/null | grep -m2 -E 'topResumedActivity|mResumedActivity'"]);
+    const r = await runRoot("dumpsys activity activities 2>/dev/null | grep -m2 -E 'topResumedActivity|mResumedActivity'");
     if (!r.ok || !r.out) {
         return {
             available: false,

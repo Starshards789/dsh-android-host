@@ -23,6 +23,8 @@
  *   空数据不是故障，别让模型以为工具坏了。
  */
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, realpathSync } from "node:fs";
+
+
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve as resolvePath, join, relative, isAbsolute } from "node:path";
@@ -77,16 +79,26 @@ function run(cmd, args, timeoutMs = 6000) {
 }
 
 let _rootCache = null;
+/** Magisk 的 su 在 /debug_ramdisk/su，不在 PATH。
+ *  ★ 不能用 existsSync 探测：App 身份（untrusted_app）stat magisk_file 被 SELinux 拒，
+ *    会误判为「不存在」并退回 "su"（而 su 不在 PATH）→ 整个插件报 root 不可用。
+ *  改为「先直连绝对路径，失败再退回 PATH 里的 su」。 */
+async function runRoot(cmd, timeoutMs = 6000) {
+    let r = await run("/debug_ramdisk/su", ["-c", cmd], timeoutMs);
+    if (!r.ok) r = await run("su", ["-c", cmd], timeoutMs);
+    return r;
+}
+
 async function hasRoot() {
     if (_rootCache !== null) return _rootCache;
-    const r = await run("su", ["-c", "id -u"]);
+    const r = await runRoot("id -u");
     _rootCache = r.ok && r.out.split("\n").some((l) => l.trim() === "0");
     return _rootCache;
 }
 
 /** 以 root 跑一条 shell 命令 */
 async function asRoot(cmd, timeoutMs = 8000) {
-    return run("su", ["-c", cmd], timeoutMs);
+    return runRoot(cmd, timeoutMs);
 }
 
 /**
@@ -223,8 +235,9 @@ function makeFileTool() {
                         return {
                             name: n,
                             type: st?.isDirectory() ? "dir" : "file",
-                            size: st?.isFile() ? st.size : undefined,
-                            mtime: st ? new Date(st.mtimeMs).toISOString() : undefined,
+                            // ★ dsh 的 output schema 校验要求“lossless JSON”，undefined 会被拒绝
+                            ...(st?.isFile() ? { size: st.size } : {}),
+                            ...(st ? { mtime: new Date(st.mtimeMs).toISOString() } : {}),
                         };
                     });
                     return {
