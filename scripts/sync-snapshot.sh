@@ -59,11 +59,27 @@ echo "打包：/tmp/$PKG ($SIZE B)"
 
 # 4) 推送 + 解压到固定路径
 adb -s "$SERIAL" push "/tmp/$PKG" "$REMOTE_DIR/$PKG" >/dev/null
+
+# 先写好 .snapshot-head（零八读快照时一眼知道对应哪个 commit）
+DIRTY_FLAG=$([ -n "$DIRTY" ] && echo "yes" || echo "no")
+HEAD_INFO="HEAD     $HEAD
+branch   $BRANCH
+time     $(date '+%Y-%m-%d %H:%M:%S %Z')
+dirty    $DIRTY_FLAG
+source   $SRC
+package  $PKG"
+
+adb -s "$SERIAL" shell "cat > $REMOTE_DIR/.snapshot-head <<'SNAPEOF'
+$HEAD_INFO
+SNAPEOF
+"
+
 adb -s "$SERIAL" shell "
   cd $REMOTE_DIR
   rm -rf dsh-repo-latest.tmp
   mkdir -p dsh-repo-latest.tmp
   tar xzf $PKG -C dsh-repo-latest.tmp
+  cp .snapshot-head dsh-repo-latest.tmp/.snapshot-head
   rm -rf dsh-repo-latest
   mv dsh-repo-latest.tmp dsh-repo-latest
 "
