@@ -197,15 +197,15 @@ minTargetSdkVersion=26 → domain=untrusted_app_27   levelFrom=user
 | **P7** | **引擎自愈重写（v0.8.1→v0.8.4）+ 三层看护** | **✅ 完成（2026-10-30 真机验收）** |
 | **P7.5** | **记忆系统第 0、1 步（引擎自愈 + 收尾三问触发器）** | **✅ 完成（2026-10-30，见 `docs/research/memory-trigger.md`）** |
 | **P8** | **零八从旧壳迁到新壳 + 旧壳退役** | **✅ 完成（2026-10-30 21:20 验收，见 `docs/ops/migration-cutover.md`）** |
-| **P11** | **无障碍读屏桥（DshA11yService + 本地 HTTP 3181）** | **✅ 完成（v1.3.2，零八实测 3/3，见 `docs/reference/a11y-bridge.md`）** |
+| **P11** | **无障碍读屏桥（DshA11yService + 本地 HTTP 3181）** | **✅ 完成（v1.3.3，零八实测 3/3，见 `docs/reference/a11y-bridge.md`）** |
 | P9 | 记忆系统第 2–4 步（L0 一页纸 / 三个原生工具 / 后台巩固） | 📝 设计完成，第 3 步等一周观测后决定 |
 | P10 | 主动性（定时 / 目标 / 技能） | 待办 |
 
-### 当前实机状态（2026-11-06 22:55 实测）
+### 当前实机状态（2026-11-08 19:30 实测）
 
 ```
 设备       OnePlus 8T KB2000 / LineageOS 24.0-20261030-NIGHTLY-kebab / Android 17
-App        cc.bestly.dsh  v1.3.2  versionCode 33  uid 10180  targetSdk 28
+App        cc.bestly.dsh  v1.3.3  versionCode 34  uid 10177  targetSdk 28
 无障碍     DshA11yService 已启用并绑定（capabilities=33）
            本地桥 127.0.0.1:3181，X-DSH-Token 鉴权；引擎 environ 已确认注入
            读屏 / 点按 / 输入 / 滚动 / 截图可用；多点触控（/touch /gesture）未实现

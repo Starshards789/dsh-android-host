@@ -118,3 +118,17 @@ max_input_tokens: 7000
 1. 走「OpenViking 为主 + 小文件 + 快照」吗？
 2. B 档的插件做不做（约 100–200 行 JS，彻底解决「靠自觉」）？
 3. A 档今天先做吗？
+
+---
+
+## 后续（2026-11-08 补记）
+
+四问的结论**已被落地验证**：
+
+- **写入/版本**：`content/write`（create/replace/append）+ `snapshot/commit` 全部在用，本次共 8 次 commit
+- **切分粒度**：确认「一事件一文件」是对的——episodic 24 个事件、semantic 6 个文件，检索命中对应条目
+- **embedding**：8T 直连不到（未变），走 grep 优先 + 语义兜底
+- **插件 vs cron**：落地为「插件落候选 + 整理器攒 20 条再跑」，符合「分层」判断
+
+**新增实测一条**（当时没有的）：`snapshot/commit` 的 `paths` 必须精确到变动目录——
+写整棵 `memories` 会把历史积压一起提交（实测一次 move 报 243 变化）。

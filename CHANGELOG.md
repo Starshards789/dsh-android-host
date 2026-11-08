@@ -2,6 +2,23 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与语义化版本。
 
+## [1.3.3] - 2026-11-08
+
+### Fixed
+
+- **双引擎竞态**：外部 restart 信号与健康检查失败两条路径同时进入 `start()`，
+  各自启动一个引擎（实测 16:55:40 同秒双触发 → 13081 + 13082 各一个 node 进程）。
+  根因是 `_state` 守卫是「读-判断-写」，非原子。
+  - 新增 `startGuard`（`AtomicBoolean.compareAndSet`）：同秒双触发只放一个过去，
+    被拦时 `host.log` 记一行 `start 并发调用被拦（已有启动在执行）`
+  - 新增 `adoptExistingEngine()`：启动前认领已存活实例，判据三层
+    （状态 Running + `runtime/pid` 进程存活 + 命令行含 `bin.js web`），壳重启后不再多起一份
+  - `healthProblem()` / `restart()` 补 `File("/proc/<pid>").exists()` 检查，
+    覆盖「认领来的实例没有 Process 对象」的情况
+- 实测验证：单实例 13682@13081；kill 后 40s 自愈；App 重启后认领不重复。
+  同秒双触发未复现（restart 轮询 15s / 健康检查 60s，人工造不出），
+  下次真触发时以日志那行为准。
+
 ## [1.3.2] - 2026-11-06
 
 ### Fixed

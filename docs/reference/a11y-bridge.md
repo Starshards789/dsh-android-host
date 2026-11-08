@@ -1,6 +1,10 @@
 # 无障碍桥（DshA11yService + A11yHttpServer）
 
-> 状态：**已打通并验收**（2026-11-06，壳 v1.3.2 / versionCode 33）
+> 状态：**已打通并验收**（2026-11-06 首验，2026-11-08 随 v1.3.3 复验；壳 v1.3.3 / versionCode 34）
+>
+> ⚠️ **重装 App 后无障碍授权会丢**（`settings` 里 `enabled_accessibility_services` 被清空），
+> 症状是所有 `android_*` 工具报错。补法：`su -c settings put secure enabled_accessibility_services cc.bestly.dsh/.a11y.DshA11yService` + `accessibility_enabled 1`。
+> 壳自愈（`EngineService.onCreate` 里自动补）是待办，见仓库 README 待办表。
 > 目的：让引擎里的 agent（零八）能读屏、点按、输入、截图——即「看见并操作手机」。
 
 ## 1. 三层结构

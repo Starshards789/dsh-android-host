@@ -159,3 +159,19 @@
 | B 收尾钩子 | 订阅 `turn/end`，检测本轮有写操作就注入提示（插件层，小） |
 | C 工具兜底 | 插件判断信号主动提议（中） |
 | D 外部巡检 | CT106 每天读它的日记增量，空太久就提醒（治标但可靠） |
+
+---
+
+## 后续（2026-11-08 补记）
+
+触发机制**已从「手册提示」升级为「插件实时落候选」**：
+
+- `memory-candidate` 插件（`agent/turn-stopping`）每轮收尾写 `candidates/live-YYYY-MM-DD.jsonl`
+- 采集器（cron 2h + 开机 service.d）扫会话文件，写 `candidates/YYYY-MM-DD.jsonl`
+- 整理器攒够 20 条才跑（打分 → 30min 聚类 → 事件写入）
+
+**实际效果**：episodic 24 个事件、semantic 5 个内容文件，全部由这条链产生。
+
+**两条踩坑记录**：
+1. 插件必须做 sender 过滤——中继转发的「零一发言」和零一 API 直投都会被当成 456 的话（实测污染过 #4777）
+2. 跨代残缺 turn：引擎重启时 user 在旧进程收到、assistant 在新进程写 → 落一条 `user:"" seq:null` 的脏记录（已加 `if (!b.user && b.seq == null) return`）

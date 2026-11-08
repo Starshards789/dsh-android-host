@@ -1,5 +1,18 @@
 # 引擎冻结：现象、根因、处置（2026-10-30 实录）
 
+> ⚠️ **2026-11-08 更新：本文描述的冻结问题已随换系统消失，保留作历史排障记录。**
+>
+> 8T 于 2026-11-05 从 ColorOS 换到 LineageOS 24（Android 17），**没有 HANS 冻结机制**：
+> 实测 `init.svc.oplus-sh: [stopped]`、无任何 `hans` 服务；引擎进程常态 `S`（正常睡眠），
+> 非 `T`（冻结）；App 在电池优化白名单（uid `10177`）。
+>
+> 配套工具已按 456 指令处理：`freezewatch` 删除（它写死旧壳 `uid_10284`，跑起来也是假盯）、
+> `zsleep` 保留（精确 sleep，Linux `CLOCK_BOOTTIME`，与厂商冻结无关）。备份在
+> `/root/backups/8t-freeze-tools-20261108/`（含 README 与恢复步骤）。
+>
+> **本文中的 uid（10295/10284）、IP、cgroup 路径均已过时，不要照抄命令。**
+> 当前设备基线见 [`docs/reference/8t-system-baseline.md`](../reference/8t-system-baseline.md)。
+
 > 本文记录一次完整的排障过程。**结论来自实测，走错的弯路也保留** —— 弯路本身是有用的。
 
 ---
