@@ -297,6 +297,83 @@ proxy-groups:
 
 ---
 
+### 5.4 GEOSITE / GEOIP 规则集（2026-11-09 新增）
+
+**核心事实：`GEOSITE` / `GEOIP` 不是 mihomo 自带的，需要两个数据文件。**
+
+| 文件 | 大小 | 用途 | 放哪 |
+|---|---|---|---|
+| `geosite.dat` | 4.1 MB | 域名库（`GEOSITE`） | `/data/adb/proxy/` |
+| `geoip.metadb` | 8.0 MB | IP 库（`GEOIP`） | `/data/adb/proxy/` |
+
+**为什么重要**：`GEOSITE,cn` 覆盖 **110,177 条**国内域名，替代手写关键词列表（B站/知乎/微博/京东 这类非 `.cn` 的国内站也能直连）。
+
+#### 坑 1：手机下不了
+
+mihomo 启动时如果找不到这两个文件，**会自动从 GitHub 下载** —— 手机直连 GitHub Release **超时**（`dial tcp 20.205.243.166:443: connect: connection timed out`），**启动直接失败**。
+
+**正确做法**：
+
+```bash
+# 1. 在有网络的机器（CT106）下载
+curl -L -o geosite.dat  https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat
+curl -L -o geoip.metadb https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.metadb
+
+# 2. push 到手机
+adb push geosite.dat  /data/local/tmp/
+adb push geoip.metadb /data/local/tmp/
+adb shell "/debug_ramdisk/magisk su -c 'cp /data/local/tmp/geosite.dat /data/local/tmp/geoip.metadb /data/adb/proxy/ && chmod 644 /data/adb/proxy/geosite.dat /data/adb/proxy/geoip.metadb'"
+
+# 3. 测试配置（必须通过再重启）
+adb shell "/debug_ramdisk/magisk su -c '/data/adb/proxy/mihomo -t -d /data/adb/proxy'"
+```
+
+**注意**：`geoip.dat`（v2ray 格式）**不是** mihomo 用的 —— **要 `geoip.metadb`**（MMDB 格式）。下错了会继续报 `Can't find MMDB`。
+
+#### 坑 2：更新 mihomo 时要一起换
+
+`geosite.dat` / `geoip.metadb` 是**静态文件**，不会自动更新：
+
+- **换 mihomo 版本** → 保留旧文件通常兼容
+- **但规则库过期**（新域名没覆盖）→ 要手动更新
+- **更新方式**：重复上面的下载 + push + 重启
+
+#### 坑 3：备份清单
+
+**重刷 / 迁移时必须一起恢复**：
+
+```
+/data/adb/proxy/config.yaml
+/data/adb/proxy/geosite.dat
+/data/adb/proxy/geoip.metadb
+/data/adb/proxy/.secret
+```
+
+#### 规则顺序（重要）
+
+```
+内网直连 → 特殊直连(deepseek/icloud) → 特殊代理(github/openai) → GEOSITE,cn → GEOIP,CN → MATCH
+```
+
+**`GEOSITE,cn` 必须放在「特殊代理」之后** —— 否则某个域名若同时在「中国域名库」和「走代理」列表里，会被直连（错）。
+
+#### 实测数据（2026-11-09）
+
+| 站点 | 匹配 | 走向 | 耗时 |
+|---|---|---|---|
+| bilibili.com | `GeoSite(cn)` | DIRECT | 0.13s |
+| zhihu.com | `GeoSite(cn)` | DIRECT | 0.17s |
+| google.com | `Match` | PROXY[HK4] | 1.9s |
+| github.com | `DomainSuffix(github.com)` | US1 | 2.4s |
+| api.deepseek.com | `DomainSuffix(deepseek.com)` | DIRECT | 0.17s |
+| icloud.com | `DomainSuffix(icloud.com)` | DIRECT | 0.15s |
+
+**加载时间**：`GEOSITE,cn` 110,177 条 → **312ms**（`memconservative` 模式）
+
+**来源标注**：规则库来自 [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat)（mihomo 官方维护）；`GEOSITE,cn` 分类本源自 [v2fly/domain-list-community](https://github.com/v2fly/domain-list-community)。
+
+---
+
 ## 6. UI 页面结构
 
 ```
