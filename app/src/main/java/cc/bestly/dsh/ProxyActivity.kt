@@ -274,10 +274,12 @@ fun ProxyScreen(onBack: () -> Unit) {
                         Spacer(Modifier.height(8.dp))
                         g.members.forEach { m ->
                             val selected = (m == g.now)
+                            // Fallback / URLTest 组由内核自动选，手动 PUT 会被健康检查覆盖
+                            val canSwitch = (g.type == "Selector")
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable(enabled = !busy && !selected) {
+                                    .clickable(enabled = !busy && !selected && canSwitch) {
                                         scope.launch { switchNode(g.name, m) }
                                     }
                                     .padding(vertical = 6.dp, horizontal = 4.dp),
@@ -294,8 +296,13 @@ fun ProxyScreen(onBack: () -> Unit) {
                                 Text(
                                     "  $m",
                                     fontSize = 13.sp,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (canSwitch) MaterialTheme.colorScheme.onSurface
+                                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                                 )
+                                if (!canSwitch) {
+                                    Text("  自动", fontSize = 10.sp, color = Color.Gray)
+                                }
                                 val d = delays[m]
                                 if (d != null) {
                                     Text(
