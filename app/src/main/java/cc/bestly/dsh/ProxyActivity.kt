@@ -24,6 +24,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -107,10 +108,18 @@ data class ProxyGroup(
     val members: List<String>
 )
 
+/** 某个 App 的分流状态 */
+data class ProxyApp(
+    val pkg: String,
+    val uid: Int,
+    val enabled: Boolean
+)
+
 @Composable
 fun ProxyScreen(onBack: () -> Unit) {
     var status by remember { mutableStateOf<ProxyStatus?>(null) }
     var groups by remember { mutableStateOf<List<ProxyGroup>>(emptyList()) }
+    var apps by remember { mutableStateOf<List<ProxyApp>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     // key = 节点名 / 分组名, value = 毫秒（<0 表示失败）
@@ -120,6 +129,7 @@ fun ProxyScreen(onBack: () -> Unit) {
     suspend fun refresh() {
         status = probeStatus()
         groups = if (status?.running == true) fetchGroups() else emptyList()
+        apps = if (status?.running == true) fetchApps() else emptyList()
     }
 
     suspend fun control(start: Boolean) {
@@ -165,6 +175,24 @@ fun ProxyScreen(onBack: () -> Unit) {
             message = "测速完成（${realNodes.size} 个节点）"
         } catch (e: Exception) {
             message = "测速失败：${e.message}"
+        } finally {
+            busy = false
+        }
+    }
+
+    suspend fun toggleApp(app: ProxyApp) {
+        busy = true
+        message = ""
+        try {
+            val tool = "/data/adb/dsh-tools/proxy-app"
+            val verb = if (app.enabled) "off" else "on"
+            val out = rootExec("$tool $verb ${app.pkg}")
+            message = out.trim().ifBlank {
+                if (app.enabled) "已关闭 ${app.pkg}" else "已开启 ${app.pkg}"
+            }
+            apps = fetchApps()
+        } catch (e: Exception) {
+            message = "切换失败：${e.message}"
         } finally {
             busy = false
         }
@@ -319,11 +347,37 @@ fun ProxyScreen(onBack: () -> Unit) {
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
+        Text("App 分流", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(2.dp))
         Text(
-            "阶段 3（App 分流）待接入；现在只做节点切换与测速。",
+            "开关立即生效，只对选中的 App 走代理（iptables 按 UID）",
             fontSize = 11.sp, color = Color.Gray
         )
+        Spacer(Modifier.height(8.dp))
+        if (apps.isEmpty()) {
+            Text("（未读到第三方 App，或代理未运行）", fontSize = 11.sp, color = Color.Gray)
+        } else {
+            apps.forEach { app ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(app.pkg, fontSize = 12.sp)
+                        Text(
+                            "uid ${app.uid}",
+                            fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    Switch(
+                        checked = app.enabled,
+                        enabled = !busy,
+                        onCheckedChange = { scope.launch { toggleApp(app) } }
+                    )
+                }
+            }
+        }
 
         if (message.isNotBlank()) {
             Spacer(Modifier.height(8.dp))
@@ -424,6 +478,28 @@ private suspend fun fetchGroups(): List<ProxyGroup> = withContext(Dispatchers.IO
                 else -> 1
             }
         }
+    } catch (e: Exception) {
+        emptyList()
+    }
+}
+
+/** 第三方 App 及其分流状态（UID 从 iptables 规则里读） */
+private suspend fun fetchApps(): List<ProxyApp> = withContext(Dispatchers.IO) {
+    try {
+        val pkgs = rootExec("pm list packages -3 -U")
+        val rules = rootExec("iptables -t nat -L OUTPUT -n 2>/dev/null | grep -F 'com.dsh.proxy'")
+        val enabledUids = Regex("UID match (\\d+)")
+            .findAll(rules).map { it.groupValues[1] }.toSet()
+        val rx = Regex("package:(\\S+)\\s+uid:(\\d+)")
+        pkgs.lineSequence().mapNotNull { line ->
+            val m = rx.find(line) ?: return@mapNotNull null
+            ProxyApp(
+                pkg = m.groupValues[1],
+                uid = m.groupValues[2].toIntOrNull() ?: return@mapNotNull null,
+                enabled = m.groupValues[2] in enabledUids
+            )
+        }.sortedWith(compareByDescending<ProxyApp> { it.enabled }.thenBy { it.pkg })
+            .toList()
     } catch (e: Exception) {
         emptyList()
     }
