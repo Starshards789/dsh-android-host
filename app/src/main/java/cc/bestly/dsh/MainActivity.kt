@@ -207,6 +207,12 @@ fun EngineScreen(
                 Text("dsh host", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text("P1.1 · 宿主骨架", fontSize = 12.sp, color = Color.Gray)
             }
+            // 代理入口：进入代理管理页（不是开关）
+            TextButton(onClick = {
+                activity.startActivity(Intent(activity, ProxyActivity::class.java))
+            }) {
+                Text("代理", fontSize = 11.sp)
+            }
             // 主题：跟随系统 → 浅色 → 深色 → 循环。选择存在 SharedPreferences 里。
             TextButton(onClick = { onThemeChange((themeMode + 1) % 3) }) {
                 Text(
