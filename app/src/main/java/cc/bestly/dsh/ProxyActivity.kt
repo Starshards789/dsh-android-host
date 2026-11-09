@@ -209,7 +209,7 @@ fun ProxyScreen(onBack: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("代理", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text("阶段 1+2 · 状态 / 启停 / 节点", fontSize = 12.sp, color = Color.Gray)
+                Text("阶段 1+2+3 · 状态 / 节点 / App 分流", fontSize = 12.sp, color = Color.Gray)
             }
             TextButton(onClick = onBack) { Text("返回", fontSize = 11.sp) }
         }
@@ -498,8 +498,7 @@ private suspend fun fetchApps(): List<ProxyApp> = withContext(Dispatchers.IO) {
                 uid = m.groupValues[2].toIntOrNull() ?: return@mapNotNull null,
                 enabled = m.groupValues[2] in enabledUids
             )
-        }.sortedWith(compareByDescending<ProxyApp> { it.enabled }.thenBy { it.pkg })
-            .toList()
+        }.sortedBy { it.pkg }.toList()   // 固定按包名排序：动态重排会让用户点错行
     } catch (e: Exception) {
         emptyList()
     }
