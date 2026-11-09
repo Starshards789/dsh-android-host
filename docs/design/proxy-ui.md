@@ -328,6 +328,22 @@ adb shell "/debug_ramdisk/magisk su -c 'cp /data/local/tmp/geosite.dat /data/loc
 adb shell "/debug_ramdisk/magisk su -c '/data/adb/proxy/mihomo -t -d /data/adb/proxy'"
 ```
 
+**⚠️ 下载后必须校验 sha256** —— 这两个是**二进制数据文件**，下错/损坏**不一定会报错**（可能加载一部分后崩溃，或悄悄走错规则），**校验比调试便宜**：
+
+```bash
+sha256sum geosite.dat geoip.metadb
+# 和 Release 页 / 下载来源给出的 sha256 对比
+```
+
+**2026-11-09 实测值**（对应 `latest` release）：
+
+| 文件 | 大小 | sha256 |
+|---|---|---|
+| `geosite.dat` | 4,355,962 | `85073a00a3c3eb80ac76b97df2f97f7dab00cb36c8b5e7ed2354cbd016f8b088` |
+| `geoip.metadb` | 8,406,197 | `f0508298d0295ce4ae0d6d185ba24605b6ec1ef9c42409dec3271e6525b5486e` |
+
+**注意**：`latest` 会更新，**sha256 也会变** —— 校验的是「**下载源 vs 手机**」一致性（或与 Release 页对比），不是和这里的历史值对比。
+
 **注意**：`geoip.dat`（v2ray 格式）**不是** mihomo 用的 —— **要 `geoip.metadb`**（MMDB 格式）。下错了会继续报 `Can't find MMDB`。
 
 #### 坑 2：更新 mihomo 时要一起换
