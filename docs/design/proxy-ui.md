@@ -180,6 +180,33 @@ iptables -t nat -A OUTPUT -m owner --uid-owner <UID> \
 3. **不劫持 `127.0.0.1` / Tailscale 段**（否则死循环）
 4. **重启即失**（iptables 规则不在磁盘 → `service.d` 重建）
 
+### 5.1 DNS 方案（必须）
+
+iptables 只重定向 TCP，**DNS 查询仍是直连**（可能被污染）→ 必须让 mihomo 代解析。
+
+| 模式 | 行为 | 用不用 |
+|---|---|---|
+| **`fake-ip`**（默认） | 返回假 IP（`198.18.0.0/16`），由 mihomo 代解析 | ✅ **用这个**（与旧配置一致） |
+| `redir-host` | 返回真实 IP | ❌ 会暴露 DNS 查询 |
+
+```yaml
+dns:
+  enable: true
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+```
+
+⚠️ **`dns.fallback` 不能加**：会触发 geodata 自动下载 → 启动 fatal（2026-09 踩过，记在 `/root/selfproxy-2026/README.md`）。
+
+### 5.2 检查已有规则（必须）
+
+`proxy-app on` **之前**先跑 `proxy-app status`，检查有没有冲突：
+
+- 别的 `REDIRECT`（例如 `31-gms-proxy.sh` 留下的 GMS 分流）
+- 同一 UID 的重复规则
+
+**有冲突时**：先 `proxy-app off`（只删 `com.dsh.proxy` 注释的），别人的规则**不要动**（需单独确认归属）。
+
 ---
 
 ## 6. UI 页面结构
@@ -228,7 +255,8 @@ iptables -t nat -A OUTPUT -m owner --uid-owner <UID> \
 - 启停生效
 
 **回滚**：
-- 卸载 App（`adb uninstall`）→ 回到旧版本
+- **回退 APK 到上一版**：`adb install -d <旧版 APK>`（`-d` 允许降级）
+  - ⚠️ **绝不能卸载**：卸载会清掉 App 数据（对话记录、配置、插件、`dshhome`），等于毁掉整个 DSH
 - 或 `kill mihomo` + 删 service.d 脚本
 
 ### 阶段 2：节点切换 + 测速
