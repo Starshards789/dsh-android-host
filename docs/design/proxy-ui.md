@@ -180,23 +180,88 @@ iptables -t nat -A OUTPUT -m owner --uid-owner <UID> \
 3. **不劫持 `127.0.0.1` / Tailscale 段**（否则死循环）
 4. **重启即失**（iptables 规则不在磁盘 → `service.d` 重建）
 
-### 5.1 DNS 方案（必须）
+### 5.1 DNS 与域名识别（2026-11-09 实测修正）
 
-iptables 只重定向 TCP，**DNS 查询仍是直连**（可能被污染）→ 必须让 mihomo 代解析。
+#### 原方案（已证伪）：iptables 劫持 DNS
 
-| 模式 | 行为 | 用不用 |
-|---|---|---|
-| **`fake-ip`**（默认） | 返回假 IP（`198.18.0.0/16`），由 mihomo 代解析 | ✅ **用这个**（与旧配置一致） |
-| `redir-host` | 返回真实 IP | ❌ 会暴露 DNS 查询 |
+原设计想让 App 的 DNS 查询也走 mihomo（`-p udp --dport 53 -j REDIRECT --to-ports <dns端口>`），
+再配合 `enhanced-mode: fake-ip` 返回假 IP。
+
+**实测：这条规则 `pkts=0`，一个包都没拦到。**
+
+原因：**Android 10+ 的 DNS 由系统 `netd` 的 DnsResolver 代发**，不是 App 进程自己发包。
+`iptables -m owner --uid-owner <App UID>` 只能匹配「该进程自己发出的包」，
+netd 发的包 UID 属于 netd → 规则永远不命中。
+
+**结论：在 Android 10+ 上，按 UID 劫持 DNS 这条路走不通。**
+
+#### 正确方案：sniffer（TLS SNI / HTTP Host 嗅探）
+
+不劫持 DNS，改为让 mihomo 从协议握手包里读出域名：
 
 ```yaml
-dns:
+sniffer:
   enable: true
-  enhanced-mode: fake-ip
-  fake-ip-range: 198.18.0.1/16
+  force-dns-mapping: true     # DNS 映射失败时也尝试嗅探
+  parse-pure-ip: true         # 目标是纯 IP 也嗅探
+  override-destination: true  # 用嗅探出的域名覆盖目标
+  sniff:
+    TLS:
+      ports: [443, 8443]
+    HTTP:
+      ports: [80, 8080-8880]
+    QUIC:
+      ports: [443, 8443]
 ```
 
-⚠️ **`dns.fallback` 不能加**：会触发 geodata 自动下载 → 启动 fatal（2026-09 踩过，记在 `/root/selfproxy-2026/README.md`）。
+**为什么这样能工作**：
+
+1. App 用真实（可能被污染的）IP 连出去
+2. iptables 把 TCP 拦到 mihomo 的 redir 端口
+3. mihomo 从 TLS ClientHello 的 SNI 里读出真实域名
+4. 按域名匹配规则 → 交给代理服务器
+5. 代理服务器自己解析域名（不受本机 DNS 污染影响）
+
+#### 验证方法（决定性测试）
+
+故意连一个错误的 IP，靠 SNI 救回来：
+
+```sh
+# 1.2.3.4 是假 IP，正常不可能通
+curl --resolve www.google.com:443:1.2.3.4 https://www.google.com
+# 期望 200；mihomo 日志应出现 --> www.google.com:443
+```
+
+#### fake-ip 还要不要
+
+保留 `enhanced-mode: fake-ip` 无害（mihomo 内部解析器仍用它），
+但**不要指望 App 能拿到 `198.18.x.x`** —— App 的 DNS 不走 mihomo。
+
+> 实测：直接向 `127.0.0.1:1053` 手写 DNS 包，mihomo 返回 `198.18.0.4`（fake-ip 本身是正常的）；
+> 但 App 的查询根本不经过这个端口。
+
+⚠️ **`dns.fallback` 仍然不能加**：触发 geodata 自动下载 → 启动 fatal（2026-09 踩过，记在 `/root/selfproxy-2026/README.md`）。
+
+### 5.1b 节点可用性（2026-11-09 实测）
+
+`HK4-尾网` / `US1-尾网` 走 Tailscale（`100.x.x.x`），当前**不通**：
+
+- `ping 100.106.130.58` → **100% packet loss**
+- mihomo 延迟测试 → **Timeout**
+
+**影响**：`fallback` 组默认按顺序取第一个，选了尾网 → 全部流量走死路（`dial tcp 100.106.130.58:443: i/o timeout`）。
+
+**对策**：组顺序改**公网优先**：
+
+```yaml
+proxy-groups:
+  - name: HK4
+    proxies: ["HK4-公网", "HK4-尾网"]
+  - name: US1
+    proxies: ["US1-公网", "US1-尾网", "US1-Hy2"]
+```
+
+**待办**：Tailscale 到 HK4/US1 的连通性单独排查（独立问题，不影响公网节点可用性）。
 
 ### 5.2 检查已有规则（必须）
 
