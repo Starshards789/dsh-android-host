@@ -51,6 +51,7 @@ object A11yHttpServer {
      * 如果每次 App 启动都换新值，必须重启引擎才能对齐 —— 那是无谓的耦合。
      * 存 SharedPreferences，App 和引擎都读同一个值。
      */
+    @Synchronized
     fun token(ctx: Context): String {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.getString(KEY_TOKEN, null)?.let { if (it.length >= 32) return it }

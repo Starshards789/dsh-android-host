@@ -213,6 +213,12 @@ fun EngineScreen(
             }) {
                 Text("代理", fontSize = 11.sp)
             }
+            // 关于入口：开源许可清单（MIT 要求许可随副本分发）
+            TextButton(onClick = {
+                activity.startActivity(Intent(activity, AboutActivity::class.java))
+            }) {
+                Text("关于", fontSize = 11.sp)
+            }
             // 主题：跟随系统 → 浅色 → 深色 → 循环。选择存在 SharedPreferences 里。
             TextButton(onClick = { onThemeChange((themeMode + 1) % 3) }) {
                 Text(
