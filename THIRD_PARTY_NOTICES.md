@@ -19,13 +19,14 @@ APK 的 `payload/dshroot/lib/node_modules/@deepseek-ai/` 下随包分发以下�
 | 包 | 版本 | 许可 | 包内是否有许可文本 |
 |---|---|---|---|
 | `@deepseek-ai/dsh` | 0.2.1.2 | MIT | ✅ 有 `LICENSE` |
-| `@deepseek-ai/dsh-tool-accessibility` | 0.1.0 | MIT | ⚠️ 仅 `package.json` 字段，需在 App 内附文本 |
-| `@deepseek-ai/dsh-tool-android` | 0.1.0 | MIT | ⚠️ 同上 |
-| `@deepseek-ai/dsh-tool-shizuku` | 0.1.0 | MIT | ⚠️ 同上 |
-| `@deepseek-ai/dsh-tool-vscreen` | 0.1.0 | MIT | ⚠️ 同上 |
+| `@deepseek-ai/dsh-tool-accessibility` | 0.1.0 | MIT | ✅ 已随 APK 分发（`assets/licenses/`） |
+| `@deepseek-ai/dsh-tool-android` | 0.1.0 | MIT | ✅ 同上 |
+| `@deepseek-ai/dsh-tool-shizuku` | 0.1.0 | MIT | ✅ 同上 |
+| `@deepseek-ai/dsh-tool-vscreen` | 0.1.0 | MIT | ✅ 同上 |
 
-**待办**：把上述四个插件的 MIT 文本放进 App 的「关于 → 开源许可」页
-（或 `app/src/main/assets/licenses/`），以满足 MIT「许可声明须随所有副本」的要求。
+**已处理（2026-11-10）**：上述四个插件的 MIT 文本已放进
+`app/src/main/assets/licenses/`，并随 APK 分发；App 内「关于 → 开源许可」页
+（`AboutActivity`）可查看全文，满足 MIT「许可声明须随所有副本」的要求。
 
 许可文本副本见 [`licenses/MIT-deepseek-harness.txt`](licenses/MIT-deepseek-harness.txt)。
 

@@ -39,7 +39,7 @@ import androidx.compose.ui.unit.sp
  * MIT 要求「许可声明须随所有副本」——只写进仓库的 THIRD_PARTY_NOTICES.md
  * 不够，必须随 APK 一起分发并让用户能看到。
  *
- * 实现：许可文本放在 assets/licenses/*.txt，本页列出文件名，
+ * 实现：许可文本放在 assets/licenses/ 目录下的 .txt 文件，本页列出文件名，
  * 点开显示全文。不联网、不依赖 WebView。
  */
 class AboutActivity : ComponentActivity() {
