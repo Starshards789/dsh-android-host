@@ -59,7 +59,9 @@ class AboutActivity : ComponentActivity() {
 @Composable
 private fun AboutScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
-    val names = remember { ctx.assets.list("licenses")?.sorted() ?: emptyArray() }
+    val names: List<String> = remember {
+        ctx.assets.list("licenses")?.sorted()?.toList() ?: emptyList()
+    }
     var sel by remember { mutableStateOf<String?>(null) }
 
     Surface(Modifier.fillMaxSize()) {
@@ -76,7 +78,7 @@ private fun AboutScreen(onBack: () -> Unit) {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text("本应用随包分发以下 MIT 许可的开源组件：", fontSize = 12.sp)
                     Spacer(Modifier.height(8.dp))
-                    names.forEach { name ->
+                    for (name in names) {
                         TextButton(onClick = { sel = name }) {
                             Text(name.removeSuffix(".txt"), fontSize = 12.sp)
                         }
