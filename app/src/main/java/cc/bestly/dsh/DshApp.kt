@@ -65,10 +65,8 @@ class DshApp : Application() {
                 contentResolver,
                 android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
             ) ?: ""
-            val mine = "$packageName/.a11y.DshA11yService"
-            val inSettings = configured.split(':').any { it.equals(mine, ignoreCase = true) }
 
-            if (!inSettings) {
+            if (!hasOurService(configured)) {
                 false
             } else {
                 // 二级：确认服务真连上（防「配置有但没连」）
@@ -82,12 +80,33 @@ class DshApp : Application() {
         }
     }
 
+    /**
+     * 判断 Settings 里的服务列表是否包含本壳的 a11y 服务。
+     *
+     * 必须用 ComponentName 归一化比较：系统里可能存短名
+     * （`cc.bestly.dsh/.a11y.DshA11yService`）也可能存全名
+     * （`cc.bestly.dsh/cc.bestly.dsh.a11y.DshA11yService`），
+     * 直接字符串比会漏判，导致每次启动都重复写。
+     */
+    private fun hasOurService(configured: String): Boolean {
+        if (configured.isBlank()) return false
+        return configured.split(':').any { entry ->
+            val cn = android.content.ComponentName.unflattenFromString(entry)
+            cn != null &&
+                cn.packageName == packageName &&
+                cn.className == A11Y_SERVICE_CLASS
+        }
+    }
+
     companion object {
         private const val TAG = "DshApp"
 
         /** 组件的扁平写法：包名/完整类名 */
         private const val A11Y_COMPONENT =
             "cc.bestly.dsh/cc.bestly.dsh.a11y.DshA11yService"
+
+        /** 仅类名，用于 ComponentName 归一化比较 */
+        private const val A11Y_SERVICE_CLASS = "cc.bestly.dsh.a11y.DshA11yService"
 
         /** 失败后 10 分钟内不再重试，避免刷日志 */
         private const val RETRY_INTERVAL_MS = 10L * 60L * 1000L
