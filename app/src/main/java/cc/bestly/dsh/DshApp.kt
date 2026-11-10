@@ -58,23 +58,28 @@ class DshApp : Application() {
         p.waitFor()
     }
 
-    private fun isA11yEnabled(): Boolean = try {
-        // 一级：读 Settings（权威配置，不受 AMS 缓存影响）
-        val configured = android.provider.Settings.Secure.getString(
-            contentResolver,
-            android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: ""
-        val mine = "$packageName/.a11y.DshA11yService"
-        val inSettings = configured.split(':').any { it.equals(mine, ignoreCase = true) }
-        if (!inSettings) return false
+    private fun isA11yEnabled(): Boolean {
+        return try {
+            // 一级：读 Settings（权威配置，不受 AMS 缓存影响）
+            val configured = android.provider.Settings.Secure.getString(
+                contentResolver,
+                android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: ""
+            val mine = "$packageName/.a11y.DshA11yService"
+            val inSettings = configured.split(':').any { it.equals(mine, ignoreCase = true) }
 
-        // 二级：确认服务真连上（防「配置有但没连」）
-        val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-        am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-            .any { info -> info.resolveInfo?.serviceInfo?.packageName == packageName }
-    } catch (t: Throwable) {
-        // 检测失败按「未开启」处理：宁可多补一次，不可漏补
-        false
+            if (!inSettings) {
+                false
+            } else {
+                // 二级：确认服务真连上（防「配置有但没连」）
+                val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+                am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                    .any { info -> info.resolveInfo?.serviceInfo?.packageName == packageName }
+            }
+        } catch (t: Throwable) {
+            // 检测异常按「未开启」处理：宁可多补一次，不可漏补
+            false
+        }
     }
 
     companion object {
