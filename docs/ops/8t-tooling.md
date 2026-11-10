@@ -141,7 +141,102 @@ MetaCubeX 的 `latest` 从 11-09 到 11-10 未变，**无需更新**。
 
 ---
 
-## 四、来源标注
+## 四、MIT 许可随包分发（2026-11-10）
+
+### 问题
+
+MIT 许可要求「版权声明和许可声明须包含在软件的所有副本或主要部分中」。
+仓库里的 `THIRD_PARTY_NOTICES.md` 只覆盖源码分发，**不覆盖 APK 分发**——
+用户装 APK 时拿不到任何许可文本。
+
+当时的缺口：
+
+- `THIRD_PARTY_NOTICES.md:27` 写着「待办」
+- `app/src/main/assets/` **目录不存在**
+- 4 个官方插件（accessibility / android / shizuku / vscreen）只有 `package.json`
+  的 `license: MIT` 字段，**包内无 LICENSE 文件**
+- UI 无「关于 → 开源许可」入口
+
+### 解法
+
+1. **建 `app/src/main/assets/licenses/`**，放 5 个文本：
+   - `MIT-dsh.txt`（内核，对应 `@deepseek-ai/dsh`）
+   - `MIT-dsh-tool-{accessibility,android,shizuku,vscreen}.txt`
+2. **新建 `AboutActivity`**（Compose）：列出 `assets/licenses/` 下所有文件，点开显示全文
+3. **`MainActivity` 标题栏加「关于」入口**（在「代理」旁边）
+4. **`THIRD_PARTY_NOTICES.md`** 的「待办」改成「已处理（2026-11-10）」
+
+### 验证
+
+```bash
+# 1. assets 是否打进 APK（解包看）
+unzip -l app-release.apk | grep licenses/
+
+# 2. UI 实测（uiautomator dump）
+adb shell input tap <关于按钮坐标>
+adb shell uiautomator dump /sdcard/ui_about.xml
+# 期望文本：返回 / 开源许可 / 本应用随包分发以下 MIT 许可的开源组件：
+#           MIT-dsh-tool-accessibility / ... / MIT-dsh
+
+# 3. 点开任意一项，截图确认正文渲染（Compose 的 Text 有时不进 a11y 树）
+```
+
+**2026-11-10 实测**：5 个文件全部列出；点开 `MIT-dsh` 截图可见
+`MIT License` / `Copyright (c) DeepSeek` / 标准授权与免责条款（底部需滚动）。
+
+### 踩过的坑
+
+**KDoc 里写 `assets/licenses/*.txt` 会导致「Unclosed comment」**：
+Kotlin 把 `/*` 解析成嵌套注释起始，整个文件编译失败。
+**写注释时提到通配符路径要避开 `/*`**，改为「目录下的 .txt 文件」。
+
+---
+
+## 五、a11y HTTP 桥 token 竞态（2026-11-10）
+
+### 问题
+
+`A11yHttpServer.token(ctx)` 的逻辑是「读-判空-生成-写回」：
+
+```kotlin
+val prefs = ctx.getSharedPreferences(PREFS, MODE_PRIVATE)
+prefs.getString(KEY_TOKEN, null)?.let { if (it.length >= 32) return it }  // 读
+val tok = ...                                                             // 生成
+prefs.edit().putString(KEY_TOKEN, tok).apply()                            // 写回
+return tok
+```
+
+两个线程同时进入时：都读到 `null` → 各自生成 → 后写覆盖先写 →
+**两个调用方拿到不同的 token**。表现是偶发 `/status` 鉴权失败，重启 App 可恢复。
+
+同类方法 `start()` 在 65 行已有 `@Synchronized`，**`token()` 漏了**。
+
+### 解法
+
+```kotlin
+@Synchronized
+fun token(ctx: Context): String {
+```
+
+一行。风格与 `start()` 一致。
+
+### 验证
+
+```bash
+# 1. 代码在（快照可验）
+grep -n -B3 'fun token' app/src/main/java/cc/bestly/dsh/a11y/A11yHttpServer.kt
+# 期望：54: @Synchronized  55: fun token(ctx: Context): String {
+
+# 2. 并发打 /status（零八实测 5 并发全部 {"ok":true}）
+```
+
+**未做的验证（已知代价过大）**：首次生成时的竞态没测——要删
+SharedPreferences 的 token + 重启引擎对齐，代价大于收益。
+**代码有 `@Synchronized` 即视为已修**（零八 2026-11-10 同意）。
+
+---
+
+## 六、来源标注
 
 | 内容 | 来源 |
 |---|---|
