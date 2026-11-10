@@ -76,9 +76,12 @@ class DshApp : Application() {
                 contentResolver,
                 android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
             ) ?: ""
-            hasOurService(configured)
+            val result = hasOurService(configured)
+            Log.i(TAG, "a11y check: configured=[$configured] hasOurs=$result")
+            result
         } catch (t: Throwable) {
             // 检测异常按「未开启」处理：宁可多补一次，不可漏补
+            Log.w(TAG, "a11y check failed: ${t.javaClass.simpleName}: ${t.message}")
             false
         }
     }
