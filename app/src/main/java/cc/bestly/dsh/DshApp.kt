@@ -60,20 +60,23 @@ class DshApp : Application() {
 
     private fun isA11yEnabled(): Boolean {
         return try {
-            // 一级：读 Settings（权威配置，不受 AMS 缓存影响）
+            // 只信 Settings 这一级。
+            //
+            // 为什么不用 AccessibilityManager 二次确认：本方法在
+            // Application.onCreate 里同步调用，此时 AMS 还没绑定我们的
+            // 服务，getEnabledAccessibilityServiceList 必然返回空 ——
+            // 二次确认会永远失败，导致每次冷启动都重写一遍（实测日志
+            // 反复出现 "a11y self-heal attempted"）。
+            //
+            // 而「Settings 有配置」时，系统在 App 启动过程中会自行绑定
+            // 无障碍服务，不需要我们干预。真出现「配置有但没连」（服务
+            // 崩溃/被系统杀），重写 settings 也救不回来，得靠用户手动
+            // 开关一次，所以二级确认没有实际收益。
             val configured = android.provider.Settings.Secure.getString(
                 contentResolver,
                 android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
             ) ?: ""
-
-            if (!hasOurService(configured)) {
-                false
-            } else {
-                // 二级：确认服务真连上（防「配置有但没连」）
-                val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-                am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-                    .any { info -> info.resolveInfo?.serviceInfo?.packageName == packageName }
-            }
+            hasOurService(configured)
         } catch (t: Throwable) {
             // 检测异常按「未开启」处理：宁可多补一次，不可漏补
             false
