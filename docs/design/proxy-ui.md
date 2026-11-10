@@ -178,6 +178,13 @@ iptables -t nat -A OUTPUT -m owner --uid-owner <UID> \
 1. **`nat OUTPUT`**（不是 `filter`，Android 10+）
 2. **UID 动态查**（App 重装会变）
 3. **不劫持 `127.0.0.1` / Tailscale 段**（否则死循环）
+   - **为什么 App 分流本身不会循环**：规则是 `--uid-owner <App UID>`，只匹配「该 App 进程发出的包」；
+     **mihomo 是 root 进程（uid 0）**，它自己出站的流量不匹配任何 App UID 规则 → 不会被二次劫持
+   - **前提（重要）**：mihomo 必须以 **root** 身份运行。
+     **如果哪天把 mihomo 改成 App 身份跑（例如塞进 dsh 壳内），这条前提立刻失效，必然循环**
+   - 同理，勾选 `com.tailscale.ipn` / `com.topjohnwu.magisk` 也不会循环：
+     它们与 mihomo 是不同 uid，mihomo 的出口流量不受这些规则约束
+     （副作用：Tailscale 的 DERP 连接会绕经代理节点，可能影响打洞质量）
 4. **重启即失**（iptables 规则不在磁盘 → `service.d` 重建）
 
 ### 5.1 DNS 与域名识别（2026-11-09 实测修正）
