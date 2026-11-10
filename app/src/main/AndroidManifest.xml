@@ -43,6 +43,7 @@
       范围限于本机回环，不放宽任何对外连接。
     -->
     <application
+        android:name=".DshApp"
         android:allowBackup="false"
         android:usesCleartextTraffic="true"
         android:label="dsh host"
